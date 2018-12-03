@@ -32,7 +32,7 @@ bool AddrFamilyAwareSocketOptionImpl::setIpSocketOption(
     if (socket.localAddress()) {
       ip = socket.localAddress()->ip();
     } else {
-std::cerr << "============== addressFromIoHandle() \n";
+      std::cerr << "============== addressFromIoHandle() \n";
       address = Address::addressFromIoHandle(socket.ioHandle());
       ip = address->ip();
     }
@@ -57,7 +57,7 @@ std::cerr << "============== addressFromIoHandle() \n";
   // IPv4 variant otherwise.
   ASSERT(ip->version() == Network::Address::IpVersion::v6);
   if (ipv6_option->isSupported()) {
-     ENVOY_LOG(error, "=========== Ipv6");
+    ENVOY_LOG(error, "=========== Ipv6");
     return ipv6_option->setOption(socket, state);
   }
   return ipv4_option->setOption(socket, state);

@@ -54,8 +54,8 @@ ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, ConnectionSocketPt
           dispatcher.getWatermarkFactory().create([this]() -> void { this->onLowWatermark(); },
                                                   [this]() -> void { this->onHighWatermark(); })),
       dispatcher_(dispatcher), id_(next_global_id_++) {
-  // Treat the lack of a valid socket_ (which in practice only happens if we run out of FDs) as an OOM
-  // condition and just crash.
+  // Treat the lack of a valid socket_ (which in practice only happens if we run out of FDs) as an
+  // OOM condition and just crash.
   RELEASE_ASSERT(!socket_->isClosed(), "");
 
   if (!connected) {
@@ -65,8 +65,8 @@ ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, ConnectionSocketPt
   // We never ask for both early close and read at the same time. If we are reading, we want to
   // consume all available data.
   file_event_ = dispatcher_.createFileEvent(
-      ioHandle().id(), [this](uint32_t events) -> void { onFileEvent(events); }, Event::FileTriggerType::Edge,
-      Event::FileReadyType::Read | Event::FileReadyType::Write);
+      ioHandle().id(), [this](uint32_t events) -> void { onFileEvent(events); },
+      Event::FileTriggerType::Edge, Event::FileReadyType::Read | Event::FileReadyType::Write);
 
   transport_socket_->setTransportSocketCallbacks(*this);
 }

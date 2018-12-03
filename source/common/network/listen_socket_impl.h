@@ -26,9 +26,7 @@ public:
       io_handle_->close();
     }
   }
-  bool isClosed() override {
-    return io_handle_->isClosed();
-  }
+  bool isClosed() override { return io_handle_->isClosed(); }
   void ensureOptions() {
     if (!options_) {
       options_ = std::make_shared<std::vector<OptionConstSharedPtr>>();

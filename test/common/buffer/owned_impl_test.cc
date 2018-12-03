@@ -1,7 +1,7 @@
 #include "common/api/os_sys_calls_impl.h"
 #include "common/buffer/buffer_impl.h"
-
 #include "common/network/io_handle_impl.h"
+
 #include "test/mocks/api/mocks.h"
 #include "test/test_common/threadsafe_singleton_injector.h"
 

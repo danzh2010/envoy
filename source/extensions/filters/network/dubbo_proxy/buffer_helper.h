@@ -52,7 +52,9 @@ public:
   }
   void move(Buffer::Instance&) override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
   void move(Buffer::Instance&, uint64_t) override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
-  Api::SysCallIntResult read(IoHandle& io_handle, uint64_t) override { NOT_IMPLEMENTED_GCOVR_EXCL_LINE; }
+  Api::SysCallIntResult read(IoHandle& io_handle, uint64_t) override {
+    NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
+  }
   uint64_t reserve(uint64_t, Buffer::RawSlice*, uint64_t) override {
     NOT_IMPLEMENTED_GCOVR_EXCL_LINE;
   }

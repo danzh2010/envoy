@@ -50,7 +50,7 @@ public:
               EXPECT_EQ(option_val, *static_cast<const int*>(optval));
               return 0;
             }));
-    std::cerr << "=========== call setOption()1\n";
+        std::cerr << "=========== call setOption()1\n";
         EXPECT_TRUE(socket_option.setOption(socket_, state));
       } else {
         EXPECT_FALSE(socket_option.setOption(socket_, state));
@@ -69,7 +69,7 @@ public:
           return when.find(state) != when.end();
         });
     for (auto state : unset_socketstates) {
-  std::cerr << "=========== call setOption()2\n";
+      std::cerr << "=========== call setOption()2\n";
       if (is_v6) {
         EXPECT_CALL(os_sys_calls_, getsockopt_(_, _, IPV6_V6ONLY, _, _));
       }

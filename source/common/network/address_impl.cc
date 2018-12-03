@@ -7,8 +7,8 @@
 
 #include <array>
 #include <cstdint>
-#include <string>
 #include <iostream>
+#include <string>
 
 #include "envoy/common/exception.h"
 
@@ -18,8 +18,8 @@
 #include "common/common/utility.h"
 #include "common/network/io_handle_impl.h"
 
-using Envoy::Api::SysCallSizeResult;
 using Envoy::Api::SysCallIntResult;
+using Envoy::Api::SysCallSizeResult;
 
 namespace Envoy {
 namespace Network {
@@ -109,7 +109,9 @@ InstanceConstSharedPtr addressFromIoHandle(IoHandle& io_handle) {
   if (ss.ss_family == AF_INET6) {
     std::cerr << "============== addressFromIoHandle() getSocketOption\n";
     socklen_t size_int = sizeof(socket_v6only);
-    RELEASE_ASSERT(io_handle.getSocketOption(IPPROTO_IPV6, IPV6_V6ONLY, &socket_v6only, &size_int).rc_ == 0, "");
+    RELEASE_ASSERT(
+        io_handle.getSocketOption(IPPROTO_IPV6, IPV6_V6ONLY, &socket_v6only, &size_int).rc_ == 0,
+        "");
   }
   return addressFromSockAddr(ss, ss_len, result.rc_ == 0 && socket_v6only);
 }
@@ -119,7 +121,8 @@ InstanceConstSharedPtr peerAddressFromIoHandle(IoHandle& io_handle) {
   socklen_t ss_len = sizeof ss;
   SysCallIntResult result = io_handle.getPeerName(reinterpret_cast<sockaddr*>(&ss), &ss_len);
   if (result.rc_ != 0) {
-    throw EnvoyException(fmt::format("getPeerName failed for '{}': {}", io_handle.id(), strerror(result.errno_)));
+    throw EnvoyException(
+        fmt::format("getPeerName failed for '{}': {}", io_handle.id(), strerror(result.errno_)));
   }
 #ifdef __APPLE__
   if (ss_len == sizeof(sockaddr) && ss.ss_family == AF_UNIX) {
@@ -132,7 +135,8 @@ InstanceConstSharedPtr peerAddressFromIoHandle(IoHandle& io_handle) {
     ss_len = sizeof ss;
     result = io_handle.getSocketName(reinterpret_cast<sockaddr*>(&ss), &ss_len);
     if (result.rc_ != 0) {
-      throw EnvoyException(fmt::format("getSocketName failed for '{}': {}", io_handle.id(), strerror(result.errno_)));
+      throw EnvoyException(fmt::format("getSocketName failed for '{}': {}", io_handle.id(),
+                                       strerror(result.errno_)));
     }
   }
   return addressFromSockAddr(ss, ss_len);

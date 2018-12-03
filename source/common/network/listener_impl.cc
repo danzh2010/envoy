@@ -42,8 +42,9 @@ void ListenerImpl::listenCallback(evconnlistener*, evutil_socket_t fd, sockaddr*
           : Address::addressFromSockAddr(*reinterpret_cast<const sockaddr_storage*>(remote_addr),
                                          remote_addr_len,
                                          local_address->ip()->version() == Address::IpVersion::v6);
-  listener->cb_.onAccept(std::make_unique<AcceptedSocketImpl>(std::move(io_handle), local_address, remote_address),
-                         listener->hand_off_restored_destination_connections_);
+  listener->cb_.onAccept(
+      std::make_unique<AcceptedSocketImpl>(std::move(io_handle), local_address, remote_address),
+      listener->hand_off_restored_destination_connections_);
 }
 
 ListenerImpl::ListenerImpl(Event::DispatcherImpl& dispatcher, Socket& socket, ListenerCallbacks& cb,
@@ -61,8 +62,8 @@ ListenerImpl::ListenerImpl(Event::DispatcherImpl& dispatcher, Socket& socket, Li
 
   if (bind_to_port) {
     // TODO(danzh): wrap evconnlistener_new() in IoHandle.
-    listener_.reset(
-        evconnlistener_new(&dispatcher.base(), listenCallback, this, 0, -1, socket.ioHandle().id()));
+    listener_.reset(evconnlistener_new(&dispatcher.base(), listenCallback, this, 0, -1,
+                                       socket.ioHandle().id()));
 
     if (!listener_) {
       throw CreateListenerException(

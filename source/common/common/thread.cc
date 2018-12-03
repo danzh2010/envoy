@@ -22,12 +22,13 @@ class ThreadImpl : public Thread {
 public:
   ThreadImpl(std::function<void()> thread_routine) : thread_routine_(thread_routine) {
     RELEASE_ASSERT(Logger::Registry::initialized(), "");
-    int rc = pthread_create(&thread_id_, nullptr,
-                            [](void* arg) -> void* {
-                              static_cast<ThreadImpl*>(arg)->thread_routine_();
-                              return nullptr;
-                            },
-                            this);
+    int rc = pthread_create(
+        &thread_id_, nullptr,
+        [](void* arg) -> void* {
+          static_cast<ThreadImpl*>(arg)->thread_routine_();
+          return nullptr;
+        },
+        this);
     RELEASE_ASSERT(rc == 0, "");
   }
 

@@ -1,6 +1,6 @@
 #include "common/network/addr_family_aware_socket_option_impl.h"
-
 #include "common/network/io_handle_impl.h"
+
 #include "test/common/network/socket_option_test.h"
 
 using testing::ReturnRef;
@@ -126,7 +126,7 @@ TEST_F(AddrFamilyAwareSocketOptionImplTest, V6OnlyV4Fallback) {
         return Api::SysCallIntResult{::socket(domain, type, protocol), errno};
       }));
   EXPECT_CALL(os_sys_calls_, setsockopt_(_, _, IPV6_V6ONLY, _, _));
-  IoHandlePtr io_handle  = address.socket(Address::SocketType::Stream);
+  IoHandlePtr io_handle = address.socket(Address::SocketType::Stream);
   EXPECT_CALL(socket_, ioHandle()).WillRepeatedly(ReturnRef(*io_handle));
 
   AddrFamilyAwareSocketOptionImpl socket_option{envoy::api::v2::core::SocketOption::STATE_PREBIND,
