@@ -10,23 +10,25 @@
 #include "common/event/dispatcher_impl.h"
 #include "common/event/file_event_impl.h"
 #include "common/network/address_impl.h"
+#include "common/network/io_handle_impl.h"
 
 #include "event2/listener.h"
 
 namespace Envoy {
 namespace Network {
 
-Address::InstanceConstSharedPtr ListenerImpl::getLocalAddress(int fd) {
-  return Address::addressFromFd(fd);
+Address::InstanceConstSharedPtr ListenerImpl::getLocalAddress(IoHandle& io_handle) {
+  return Address::addressFromIoHandle(io_handle);
 }
 
 void ListenerImpl::listenCallback(evconnlistener*, evutil_socket_t fd, sockaddr* remote_addr,
                                   int remote_addr_len, void* arg) {
   ListenerImpl* listener = static_cast<ListenerImpl*>(arg);
+  IoHandlePtr io_handle = absl::make_unique<FdIoHandleImpl>(fd);
   // Get the local address from the new socket if the listener is listening on IP ANY
   // (e.g., 0.0.0.0 for IPv4) (local_address_ is nullptr in this case).
   const Address::InstanceConstSharedPtr& local_address =
-      listener->local_address_ ? listener->local_address_ : listener->getLocalAddress(fd);
+      listener->local_address_ ? listener->local_address_ : listener->getLocalAddress(*io_handle);
   // The accept() call that filled in remote_addr doesn't fill in more than the sa_family field
   // for Unix domain sockets; apparently there isn't a mechanism in the kernel to get the
   // sockaddr_un associated with the client socket when starting from the server socket.
@@ -36,11 +38,11 @@ void ListenerImpl::listenCallback(evconnlistener*, evutil_socket_t fd, sockaddr*
   // IPv4 local_address was created from an IPv6 mapped IPv4 address.
   const Address::InstanceConstSharedPtr& remote_address =
       (remote_addr->sa_family == AF_UNIX)
-          ? Address::peerAddressFromFd(fd)
+          ? Address::peerAddressFromIoHandle(*io_handle)
           : Address::addressFromSockAddr(*reinterpret_cast<const sockaddr_storage*>(remote_addr),
                                          remote_addr_len,
                                          local_address->ip()->version() == Address::IpVersion::v6);
-  listener->cb_.onAccept(std::make_unique<AcceptedSocketImpl>(fd, local_address, remote_address),
+  listener->cb_.onAccept(std::make_unique<AcceptedSocketImpl>(std::move(io_handle), local_address, remote_address),
                          listener->hand_off_restored_destination_connections_);
 }
 
@@ -58,8 +60,9 @@ ListenerImpl::ListenerImpl(Event::DispatcherImpl& dispatcher, Socket& socket, Li
   }
 
   if (bind_to_port) {
+    // TODO(danzh): wrap evconnlistener_new() in IoHandle.
     listener_.reset(
-        evconnlistener_new(&dispatcher.base(), listenCallback, this, 0, -1, socket.fd()));
+        evconnlistener_new(&dispatcher.base(), listenCallback, this, 0, -1, socket.ioHandle().id()));
 
     if (!listener_) {
       throw CreateListenerException(

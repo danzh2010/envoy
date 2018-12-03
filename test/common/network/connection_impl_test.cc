@@ -8,6 +8,7 @@
 #include "common/event/dispatcher_impl.h"
 #include "common/network/address_impl.h"
 #include "common/network/connection_impl.h"
+#include "common/network/io_handle_impl.h"
 #include "common/network/listen_socket_impl.h"
 #include "common/network/utility.h"
 #include "common/runtime/runtime_impl.h"
@@ -79,9 +80,11 @@ TEST_P(ConnectionImplDeathTest, BadFd) {
   Event::SimulatedTimeSystem time_system;
   Event::DispatcherImpl dispatcher(time_system);
   EXPECT_DEATH_LOG_TO_STDERR(
-      ConnectionImpl(dispatcher, std::make_unique<ConnectionSocketImpl>(-1, nullptr, nullptr),
+      ConnectionImpl(dispatcher,
+                     std::make_unique<ConnectionSocketImpl>(absl::make_unique<FdIoHandleImpl>(-1),
+                                                            nullptr, nullptr),
                      Network::Test::createRawBufferSocket(), false),
-      ".*assert failure: fd\\(\\) != -1.*");
+      ".*assert failure: !socket_->isClosed\\(\\).*");
 }
 
 class ConnectionImplTest : public testing::TestWithParam<Address::IpVersion> {
@@ -726,9 +729,9 @@ TEST_P(ConnectionImplTest, WriteWithWatermarks) {
       .WillRepeatedly(DoAll(AddBufferToStringWithoutDraining(&data_written),
                             Invoke(client_write_buffer_, &MockWatermarkBuffer::baseMove)));
   EXPECT_CALL(*client_write_buffer_, write(_))
-      .WillOnce(Invoke([&](int fd) -> Api::SysCallIntResult {
+      .WillOnce(Invoke([&](IoHandle& io_handle) -> Api::SysCallIntResult {
         dispatcher_->exit();
-        return client_write_buffer_->failWrite(fd);
+        return client_write_buffer_->failWrite(io_handle);
       }));
   // The write() call on the connection will buffer enough data to bring the connection above the
   // high watermark and as the data will not flush it should not return below the watermark.
@@ -811,7 +814,7 @@ TEST_P(ConnectionImplTest, WatermarkFuzzing) {
     EXPECT_CALL(*client_write_buffer_, move(_))
         .WillOnce(Invoke(client_write_buffer_, &MockWatermarkBuffer::baseMove));
     EXPECT_CALL(*client_write_buffer_, write(_))
-        .WillOnce(DoAll(Invoke([&](int) -> void { client_write_buffer_->drain(bytes_to_flush); }),
+        .WillOnce(DoAll(Invoke([&](IoHandle&) -> void { client_write_buffer_->drain(bytes_to_flush); }),
                         Return(Api::SysCallIntResult{bytes_to_flush, 0})))
         .WillRepeatedly(testing::Invoke(client_write_buffer_, &MockWatermarkBuffer::failWrite));
     client_connection_->write(buffer_to_write, false);
@@ -956,7 +959,7 @@ TEST_P(ConnectionImplTest, FlushWriteCloseTest) {
 TEST_P(ConnectionImplTest, FlushWriteCloseTimeoutTest) {
   ConnectionMocks mocks = createConnectionMocks();
   auto server_connection = std::make_unique<Network::ConnectionImpl>(
-      *mocks.dispatcher, std::make_unique<ConnectionSocketImpl>(0, nullptr, nullptr),
+      *mocks.dispatcher, std::make_unique<ConnectionSocketImpl>(absl::make_unique<FdIoHandleImpl>(0), nullptr, nullptr),
       std::move(mocks.transport_socket), true);
 
   InSequence s1;
@@ -1081,7 +1084,7 @@ TEST_P(ConnectionImplTest, FlushWriteAndDelayConfigDisabledTest) {
         return new Buffer::WatermarkBuffer(below_low, above_high);
       }));
   std::unique_ptr<Network::ConnectionImpl> server_connection(new Network::ConnectionImpl(
-      dispatcher, std::make_unique<ConnectionSocketImpl>(0, nullptr, nullptr),
+      dispatcher, std::make_unique<ConnectionSocketImpl>(absl::make_unique<FdIoHandleImpl>(0), nullptr, nullptr),
       std::make_unique<NiceMock<MockTransportSocket>>(), true));
 
   time_system_.setMonotonicTime(std::chrono::milliseconds(0));
@@ -1109,7 +1112,7 @@ TEST_P(ConnectionImplTest, FlushWriteAndDelayConfigDisabledTest) {
 TEST_P(ConnectionImplTest, DelayedCloseTimeoutDisableOnSocketClose) {
   ConnectionMocks mocks = createConnectionMocks();
   auto server_connection = std::make_unique<Network::ConnectionImpl>(
-      *mocks.dispatcher, std::make_unique<ConnectionSocketImpl>(0, nullptr, nullptr),
+      *mocks.dispatcher, std::make_unique<ConnectionSocketImpl>(absl::make_unique<FdIoHandleImpl>(0), nullptr, nullptr),
       std::move(mocks.transport_socket), true);
 
   InSequence s1;
@@ -1133,7 +1136,7 @@ TEST_P(ConnectionImplTest, DelayedCloseTimeoutDisableOnSocketClose) {
 TEST_P(ConnectionImplTest, DelayedCloseTimeoutNullStats) {
   ConnectionMocks mocks = createConnectionMocks();
   auto server_connection = std::make_unique<Network::ConnectionImpl>(
-      *mocks.dispatcher, std::make_unique<ConnectionSocketImpl>(0, nullptr, nullptr),
+      *mocks.dispatcher, std::make_unique<ConnectionSocketImpl>(absl::make_unique<FdIoHandleImpl>(0), nullptr, nullptr),
       std::move(mocks.transport_socket), true);
 
   InSequence s1;
@@ -1181,7 +1184,7 @@ public:
           transport_socket_callbacks_ = &callbacks;
         }));
     connection_ = std::make_unique<ConnectionImpl>(
-        dispatcher_, std::make_unique<ConnectionSocketImpl>(0, nullptr, nullptr),
+        dispatcher_, std::make_unique<ConnectionSocketImpl>(std::make_unique<FdIoHandleImpl>(0), nullptr, nullptr),
         TransportSocketPtr(transport_socket_), true);
     connection_->addConnectionCallbacks(callbacks_);
   }

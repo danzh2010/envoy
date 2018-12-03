@@ -6,6 +6,7 @@
 #include "envoy/api/v2/core/base.pb.h"
 #include "envoy/common/pure.h"
 #include "envoy/network/address.h"
+#include "envoy/network/io_handle.h"
 
 #include "absl/strings/string_view.h"
 
@@ -27,12 +28,17 @@ public:
   /**
    * @return fd the socket's file descriptor.
    */
-  virtual int fd() const PURE;
+  virtual IoHandle& ioHandle() PURE;
 
   /**
    * Close the underlying socket.
    */
   virtual void close() PURE;
+
+  /**
+   * @return true if the socket is closed.
+   */
+  virtual bool isClosed() PURE;
 
   /**
    * Visitor class for setting socket options.

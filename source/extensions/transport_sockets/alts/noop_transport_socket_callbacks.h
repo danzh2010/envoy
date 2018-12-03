@@ -17,7 +17,7 @@ public:
   explicit NoOpTransportSocketCallbacks(Network::TransportSocketCallbacks& parent)
       : parent_(parent) {}
 
-  int fd() const override { return parent_.fd(); }
+  IoHandle& ioHandle() const override { return parent_.ioHandle(); }
   Network::Connection& connection() override { return parent_.connection(); }
   bool shouldDrainReadBuffer() override { return false; }
   /*

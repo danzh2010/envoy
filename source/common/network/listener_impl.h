@@ -23,7 +23,7 @@ public:
   void enable();
 
 protected:
-  virtual Address::InstanceConstSharedPtr getLocalAddress(int fd);
+  virtual Address::InstanceConstSharedPtr getLocalAddress(IoHandle& io_handle);
 
   Address::InstanceConstSharedPtr local_address_;
   ListenerCallbacks& cb_;

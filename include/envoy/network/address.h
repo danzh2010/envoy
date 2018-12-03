@@ -10,6 +10,7 @@
 
 #include "envoy/api/os_sys_calls.h"
 #include "envoy/common/pure.h"
+#include "envoy/network/io_handle.h"
 
 #include "absl/numeric/int128.h"
 
@@ -128,20 +129,20 @@ public:
   /**
    * Bind a socket to this address. The socket should have been created with a call to socket() on
    * an Instance of the same address family.
-   * @param fd supplies the platform socket handle.
+   * @param io_handle supplies the platform socket handle.
    * @return a Api::SysCallIntResult with rc_ = 0 for success and rc_ = -1 for failure. If the call
    *   is successful, errno_ shouldn't be used.
    */
-  virtual Api::SysCallIntResult bind(int fd) const PURE;
+  virtual Api::SysCallIntResult bind(IoHandle& io_handle) const PURE;
 
   /**
    * Connect a socket to this address. The socket should have been created with a call to socket()
    * on this object.
-   * @param fd supplies the platform socket handle.
+   * @param io_handle supplies the platform socket handle.
    * @return a Api::SysCallIntResult with rc_ = 0 for success and rc_ = -1 for failure. If the call
    *   is successful, errno_ shouldn't be used.
    */
-  virtual Api::SysCallIntResult connect(int fd) const PURE;
+  virtual Api::SysCallIntResult connect(IoHandle& io_handle) const PURE;
 
   /**
    * @return the IP address information IFF type() == Type::Ip, otherwise nullptr.
@@ -154,7 +155,7 @@ public:
    * @return the file descriptor naming the socket. In case of a failure, the program would be
    *   aborted.
    */
-  virtual int socket(SocketType type) const PURE;
+  virtual IoHandlePtr socket(SocketType type) const PURE;
 
   /**
    * @return the type of address.

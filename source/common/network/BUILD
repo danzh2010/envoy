@@ -14,6 +14,7 @@ envoy_cc_library(
     srcs = ["address_impl.cc"],
     hdrs = ["address_impl.h"],
     deps = [
+        ":io_handle_lib",
         "//include/envoy/network:address_interface",
         "//source/common/api:os_sys_calls_lib",
         "//source/common/common:assert_lib",
@@ -118,6 +119,7 @@ envoy_cc_library(
     deps = [
         ":address_lib",
         ":utility_lib",
+        "//include/envoy/network:io_handle_interface",
         "//include/envoy/network:listen_socket_interface",
         "//source/common/common:assert_lib",
         "//source/common/ssl:context_lib",

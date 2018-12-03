@@ -23,10 +23,10 @@ class SocketOptionTest : public testing::Test {
 public:
   SocketOptionTest() { socket_.local_address_.reset(); }
 
-  NiceMock<MockListenSocket> socket_;
   Api::MockOsSysCalls os_sys_calls_;
 
   TestThreadsafeSingletonInjector<Api::OsSysCallsImpl> os_calls_{[this]() {
+    std::cerr << "========= inject os_calls " << &os_sys_calls_ << "\n";
     // Before injecting OsSysCallsImpl, make sure validateIpv{4,6}Supported is called so the static
     // bool is initialized without requiring to mock ::socket and ::close.
     std::make_unique<Address::Ipv4Instance>("1.2.3.4", 5678);
@@ -34,10 +34,15 @@ public:
     return &os_sys_calls_;
   }()};
 
+  NiceMock<MockListenSocket> socket_;
+
   void testSetSocketOptionSuccess(
       Socket::Option& socket_option, Network::SocketOptionName option_name, int option_val,
-      const std::set<envoy::api::v2::core::SocketOption::SocketState>& when) {
+      const std::set<envoy::api::v2::core::SocketOption::SocketState>& when, bool is_v6) {
     for (auto state : when) {
+      if (is_v6) {
+        EXPECT_CALL(os_sys_calls_, getsockopt_(_, _, IPV6_V6ONLY, _, _));
+      }
       if (option_name.has_value()) {
         EXPECT_CALL(os_sys_calls_, setsockopt_(_, option_name.value().first,
                                                option_name.value().second, _, sizeof(int)))
@@ -45,6 +50,7 @@ public:
               EXPECT_EQ(option_val, *static_cast<const int*>(optval));
               return 0;
             }));
+    std::cerr << "=========== call setOption()1\n";
         EXPECT_TRUE(socket_option.setOption(socket_, state));
       } else {
         EXPECT_FALSE(socket_option.setOption(socket_, state));
@@ -63,6 +69,10 @@ public:
           return when.find(state) != when.end();
         });
     for (auto state : unset_socketstates) {
+  std::cerr << "=========== call setOption()2\n";
+      if (is_v6) {
+        EXPECT_CALL(os_sys_calls_, getsockopt_(_, _, IPV6_V6ONLY, _, _));
+      }
       EXPECT_CALL(os_sys_calls_, setsockopt_(_, _, _, _, _)).Times(0);
       EXPECT_TRUE(socket_option.setOption(socket_, state));
     }

@@ -50,7 +50,7 @@ public:
   /**
    * @return int the file descriptor associated with the connection.
    */
-  virtual int fd() const PURE;
+  virtual IoHandle& ioHandle() const PURE;
 
   /**
    * @return Network::Connection& the connection interface.

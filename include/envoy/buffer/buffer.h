@@ -8,7 +8,7 @@
 #include "envoy/api/os_sys_calls.h"
 #include "envoy/common/exception.h"
 #include "envoy/common/pure.h"
-
+#include "envoy/network/io_handle.h"
 #include "common/common/byte_order.h"
 
 #include "absl/strings/string_view.h"
@@ -159,12 +159,12 @@ public:
 
   /**
    * Read from a file descriptor directly into the buffer.
-   * @param fd supplies the descriptor to read from.
+   * @param io_handle supplies the IO interface to read from.
    * @param max_length supplies the maximum length to read.
    * @return a Api::SysCallIntResult with rc_ = the number of bytes read if successful, or rc_ = -1
    *   for failure. If the call is successful, errno_ shouldn't be used.
    */
-  virtual Api::SysCallIntResult read(int fd, uint64_t max_length) PURE;
+  virtual Api::SysCallIntResult read(Network::IoHandle& io_handle, uint64_t max_length) PURE;
 
   /**
    * Reserve space in the buffer.
@@ -192,11 +192,11 @@ public:
 
   /**
    * Write the buffer out to a file descriptor.
-   * @param fd supplies the descriptor to write to.
+   * @param io_handle supplies the IO interface to write to.
    * @return a Api::SysCallIntResult with rc_ = the number of bytes written if successful, or rc_ =
    * -1 for failure. If the call is successful, errno_ shouldn't be used.
    */
-  virtual Api::SysCallIntResult write(int fd) PURE;
+  virtual Api::SysCallIntResult write(Network::IoHandle& io_handle) PURE;
 
   /**
    * Copy an integer out of the buffer.

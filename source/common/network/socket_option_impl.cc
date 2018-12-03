@@ -6,12 +6,15 @@
 #include "common/common/assert.h"
 #include "common/network/address_impl.h"
 
+#include <iostream>
+
 namespace Envoy {
 namespace Network {
 
 // Socket::Option
 bool SocketOptionImpl::setOption(Socket& socket,
                                  envoy::api::v2::core::SocketOption::SocketState state) const {
+  ENVOY_LOG(error, "============= setOption state {} ", state);
   if (in_state_ == state) {
     const Api::SysCallIntResult result =
         SocketOptionImpl::setSocketOption(socket, optname_, value_);
@@ -28,13 +31,13 @@ bool SocketOptionImpl::isSupported() const { return optname_.has_value(); }
 Api::SysCallIntResult SocketOptionImpl::setSocketOption(Socket& socket,
                                                         Network::SocketOptionName optname,
                                                         const absl::string_view value) {
+  ENVOY_LOG(error, "=========== setSocketOption ");
 
   if (!optname.has_value()) {
     return {-1, ENOTSUP};
   }
-  auto& os_syscalls = Api::OsSysCallsSingleton::get();
-  return os_syscalls.setsockopt(socket.fd(), optname.value().first, optname.value().second,
-                                value.data(), value.size());
+  return socket.ioHandle().setSocketOption(optname.value().first, optname.value().second,
+                                           value.data(), value.size());
 }
 
 } // namespace Network

@@ -19,6 +19,8 @@ bool AddrFamilyAwareSocketOptionImpl::setIpSocketOption(
     Socket& socket, envoy::api::v2::core::SocketOption::SocketState state,
     const std::unique_ptr<SocketOptionImpl>& ipv4_option,
     const std::unique_ptr<SocketOptionImpl>& ipv6_option) {
+  std::cerr << "============ setIpSocketOption " << &socket << " localAddress() "
+            << socket.localAddress() << "\n";
   // If this isn't IP, we're out of luck.
   Address::InstanceConstSharedPtr address;
   const Address::Ip* ip = nullptr;
@@ -30,20 +32,24 @@ bool AddrFamilyAwareSocketOptionImpl::setIpSocketOption(
     if (socket.localAddress()) {
       ip = socket.localAddress()->ip();
     } else {
-      address = Address::addressFromFd(socket.fd());
+std::cerr << "============== addressFromIoHandle() \n";
+      address = Address::addressFromIoHandle(socket.ioHandle());
       ip = address->ip();
     }
-  } catch (const EnvoyException&) {
+  } catch (const EnvoyException& ex) {
     // Ignore, we get here because we failed in getsockname().
     // TODO(htuch): We should probably clean up this logic to avoid relying on exceptions.
+    ENVOY_LOG(error, "getsockname failed: {}", std::string(ex.what()));
   }
   if (ip == nullptr) {
     ENVOY_LOG(warn, "Failed to set IP socket option on non-IP socket");
     return false;
   }
+  ENVOY_LOG(error, "=========== ip != nullptr ");
 
   // If the FD is v4, we can only try the IPv4 variant.
   if (ip->version() == Network::Address::IpVersion::v4) {
+    ENVOY_LOG(error, "=========== Ipv4");
     return ipv4_option->setOption(socket, state);
   }
 
@@ -51,6 +57,7 @@ bool AddrFamilyAwareSocketOptionImpl::setIpSocketOption(
   // IPv4 variant otherwise.
   ASSERT(ip->version() == Network::Address::IpVersion::v6);
   if (ipv6_option->isSupported()) {
+     ENVOY_LOG(error, "=========== Ipv6");
     return ipv6_option->setOption(socket, state);
   }
   return ipv4_option->setOption(socket, state);

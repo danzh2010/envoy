@@ -6,6 +6,7 @@
 #include "envoy/server/listener_manager.h"
 
 #include "common/network/address_impl.h"
+#include "common/network/io_handle_impl.h"
 #include "common/network/utility.h"
 
 #include "test/test_common/printers.h"
@@ -181,10 +182,16 @@ MockFilterChainFactory::MockFilterChainFactory() {
 }
 MockFilterChainFactory::~MockFilterChainFactory() {}
 
-MockListenSocket::MockListenSocket() : local_address_(new Address::Ipv4Instance(80)) {
-  ON_CALL(*this, localAddress()).WillByDefault(ReturnRef(local_address_));
+MockListenSocket::MockListenSocket()
+    : local_address_(new Address::Ipv4Instance(80)), io_handle_(new FdIoHandleImpl(-1)) {
+  ON_CALL(*this, localAddress())
+      .WillByDefault(Invoke([this]() -> const Address::InstanceConstSharedPtr& {
+        std::cerr << "=============== localAddress() called. Return local_address_ "
+                  << local_address_ << "\n";
+        return local_address_;
+      }));
   ON_CALL(*this, options()).WillByDefault(ReturnRef(options_));
-  ON_CALL(*this, fd()).WillByDefault(Return(-1));
+  ON_CALL(*this, ioHandle()).WillByDefault(ReturnRef(*io_handle_));
 }
 
 MockListenSocket::~MockListenSocket() {}

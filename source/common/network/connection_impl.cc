@@ -21,6 +21,8 @@
 #include "common/network/raw_buffer_socket.h"
 #include "common/network/utility.h"
 
+using Envoy::Api::SysCallIntResult;
+
 namespace Envoy {
 namespace Network {
 
@@ -52,9 +54,9 @@ ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, ConnectionSocketPt
           dispatcher.getWatermarkFactory().create([this]() -> void { this->onLowWatermark(); },
                                                   [this]() -> void { this->onHighWatermark(); })),
       dispatcher_(dispatcher), id_(next_global_id_++) {
-  // Treat the lack of a valid fd (which in practice only happens if we run out of FDs) as an OOM
+  // Treat the lack of a valid socket_ (which in practice only happens if we run out of FDs) as an OOM
   // condition and just crash.
-  RELEASE_ASSERT(fd() != -1, "");
+  RELEASE_ASSERT(!socket_->isClosed(), "");
 
   if (!connected) {
     connecting_ = true;
@@ -63,20 +65,20 @@ ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, ConnectionSocketPt
   // We never ask for both early close and read at the same time. If we are reading, we want to
   // consume all available data.
   file_event_ = dispatcher_.createFileEvent(
-      fd(), [this](uint32_t events) -> void { onFileEvent(events); }, Event::FileTriggerType::Edge,
+      ioHandle().id(), [this](uint32_t events) -> void { onFileEvent(events); }, Event::FileTriggerType::Edge,
       Event::FileReadyType::Read | Event::FileReadyType::Write);
 
   transport_socket_->setTransportSocketCallbacks(*this);
 }
 
 ConnectionImpl::~ConnectionImpl() {
-  ASSERT(fd() == -1 && delayed_close_timer_ == nullptr,
+  ASSERT(socket_->isClosed() && delayed_close_timer_ == nullptr,
          "ConnectionImpl was unexpectedly torn down without being closed.");
 
   // In general we assume that owning code has called close() previously to the destructor being
   // run. This generally must be done so that callbacks run in the correct context (vs. deferred
   // deletion). Hence the assert above. However, call close() here just to be completely sure that
-  // the fd is closed and make it more likely that we crash from a bad close callback.
+  // the socket is closed and make it more likely that we crash from a bad close callback.
   close(ConnectionCloseType::NoFlush);
 }
 
@@ -93,7 +95,7 @@ void ConnectionImpl::addReadFilter(ReadFilterSharedPtr filter) {
 bool ConnectionImpl::initializeReadFilters() { return filter_manager_.initializeReadFilters(); }
 
 void ConnectionImpl::close(ConnectionCloseType type) {
-  if (fd() == -1) {
+  if (socket_->isClosed()) {
     return;
   }
 
@@ -160,7 +162,7 @@ void ConnectionImpl::close(ConnectionCloseType type) {
 }
 
 Connection::State ConnectionImpl::state() const {
-  if (fd() == -1) {
+  if (socket_->isClosed()) {
     return State::Closed;
   } else if (delayed_close_) {
     return State::Closing;
@@ -170,7 +172,7 @@ Connection::State ConnectionImpl::state() const {
 }
 
 void ConnectionImpl::closeSocket(ConnectionEvent close_type) {
-  if (fd() == -1) {
+  if (socket_->isClosed()) {
     return;
   }
 
@@ -200,19 +202,19 @@ void ConnectionImpl::noDelay(bool enable) {
   // There are cases where a connection to localhost can immediately fail (e.g., if the other end
   // does not have enough fds, reaches a backlog limit, etc.). Because we run with deferred error
   // events, the calling code may not yet know that the connection has failed. This is one call
-  // where we go outside of libevent and hit the fd directly and this case can fail if the fd is
-  // invalid. For this call instead of plumbing through logic that will immediately indicate that a
-  // connect failed, we will just ignore the noDelay() call if the socket is invalid since error is
-  // going to be raised shortly anyway and it makes the calling code simpler.
-  if (fd() == -1) {
+  // where we go outside of libevent and hit the socket directly and this case can fail if the
+  // socket is invalid. For this call instead of plumbing through logic that will immediately
+  // indicate that a connect failed, we will just ignore the noDelay() call if the socket is invalid
+  // since error is going to be raised shortly anyway and it makes the calling code simpler.
+  if (socket_->isClosed()) {
     return;
   }
 
   // Don't set NODELAY for unix domain sockets
   sockaddr addr;
   socklen_t len = sizeof(addr);
-  int rc = getsockname(fd(), &addr, &len);
-  RELEASE_ASSERT(rc == 0, "");
+  SysCallIntResult result = ioHandle().getSocketName(&addr, &len);
+  RELEASE_ASSERT(result.rc_ == 0, "");
 
   if (addr.sa_family == AF_UNIX) {
     return;
@@ -220,16 +222,16 @@ void ConnectionImpl::noDelay(bool enable) {
 
   // Set NODELAY
   int new_value = enable;
-  rc = setsockopt(fd(), IPPROTO_TCP, TCP_NODELAY, &new_value, sizeof(new_value));
+  result = ioHandle().setSocketOption(IPPROTO_TCP, TCP_NODELAY, &new_value, sizeof(new_value));
 #ifdef __APPLE__
-  if (-1 == rc && errno == EINVAL) {
+  if (-1 == result.rc_ && errno == EINVAL) {
     // Sometimes occurs when the connection is not yet fully formed. Empirically, TCP_NODELAY is
     // enabled despite this result.
     return;
   }
 #endif
 
-  RELEASE_ASSERT(0 == rc, "");
+  RELEASE_ASSERT(0 == result.rc_, "");
 }
 
 uint64_t ConnectionImpl::id() const { return id_; }
@@ -466,9 +468,9 @@ void ConnectionImpl::onFileEvent(uint32_t events) {
     onWriteReady();
   }
 
-  // It's possible for a write event callback to close the socket (which will cause fd_ to be -1).
-  // In this case ignore write event processing.
-  if (fd() != -1 && (events & Event::FileReadyType::Read)) {
+  // It's possible for a write event callback to close the socket. In this case ignore write event
+  // processing.
+  if (!socket_->isClosed() && (events & Event::FileReadyType::Read)) {
     onReadReady();
   }
 }
@@ -509,8 +511,8 @@ void ConnectionImpl::onWriteReady() {
   if (connecting_) {
     int error;
     socklen_t error_size = sizeof(error);
-    int rc = getsockopt(fd(), SOL_SOCKET, SO_ERROR, &error, &error_size);
-    ASSERT(0 == rc);
+    SysCallIntResult result = ioHandle().getSocketOption(SOL_SOCKET, SO_ERROR, &error, &error_size);
+    ASSERT(0 == result.rc_);
 
     if (error == 0) {
       ENVOY_CONN_LOG(debug, "connected", *this);
@@ -546,7 +548,7 @@ void ConnectionImpl::onWriteReady() {
       cb(result.bytes_processed_);
 
       // If a callback closes the socket, stop iterating.
-      if (fd() == -1) {
+      if (socket_->isClosed()) {
         return;
       }
     }
@@ -614,7 +616,7 @@ ClientConnectionImpl::ClientConnectionImpl(
     }
 
     if (source_address != nullptr) {
-      const Api::SysCallIntResult result = source_address->bind(fd());
+      const Api::SysCallIntResult result = source_address->bind(ioHandle());
       if (result.rc_ < 0) {
         ENVOY_LOG_MISC(debug, "Bind failure. Failed to bind to {}: {}", source_address->asString(),
                        strerror(result.errno_));
@@ -632,7 +634,7 @@ ClientConnectionImpl::ClientConnectionImpl(
 
 void ClientConnectionImpl::connect() {
   ENVOY_CONN_LOG(debug, "connecting to {}", *this, socket_->remoteAddress()->asString());
-  const Api::SysCallIntResult result = socket_->remoteAddress()->connect(fd());
+  const Api::SysCallIntResult result = socket_->remoteAddress()->connect(ioHandle());
   if (result.rc_ == 0) {
     // write will become ready.
     ASSERT(connecting_);
@@ -654,7 +656,7 @@ void ClientConnectionImpl::connect() {
   // The local address can only be retrieved for IP connections. Other
   // types, such as UDS, don't have a notion of a local address.
   if (socket_->remoteAddress()->type() == Address::Type::Ip) {
-    socket_->setLocalAddress(Address::addressFromFd(fd()), false);
+    socket_->setLocalAddress(Address::addressFromIoHandle(ioHandle()), false);
   }
 }
 

@@ -16,7 +16,7 @@ namespace Envoy {
 namespace Network {
 
 void ListenSocketImpl::doBind() {
-  const Api::SysCallIntResult result = local_address_->bind(fd_);
+  const Api::SysCallIntResult result = local_address_->bind(*io_handle_);
   if (result.rc_ == -1) {
     close();
     throw EnvoyException(
@@ -25,7 +25,7 @@ void ListenSocketImpl::doBind() {
   if (local_address_->type() == Address::Type::Ip && local_address_->ip()->port() == 0) {
     // If the port we bind is zero, then the OS will pick a free port for us (assuming there are
     // any), and we need to find out the port number that the OS picked.
-    local_address_ = Address::addressFromFd(fd_);
+    local_address_ = Address::addressFromIoHandle(*io_handle_);
   }
 }
 
@@ -40,12 +40,13 @@ TcpListenSocket::TcpListenSocket(const Address::InstanceConstSharedPtr& address,
                                  const Network::Socket::OptionsSharedPtr& options,
                                  bool bind_to_port)
     : ListenSocketImpl(address->socket(Address::SocketType::Stream), address) {
-  RELEASE_ASSERT(fd_ != -1, "");
+  RELEASE_ASSERT(!isClosed(), "");
 
   // TODO(htuch): This might benefit from moving to SocketOptionImpl.
   int on = 1;
-  int rc = setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-  RELEASE_ASSERT(rc != -1, "");
+  Api::SysCallIntResult result =
+      io_handle_->setSocketOption(SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+  RELEASE_ASSERT(result.rc_ != -1, "");
 
   setListenSocketOptions(options);
 
@@ -54,20 +55,22 @@ TcpListenSocket::TcpListenSocket(const Address::InstanceConstSharedPtr& address,
   }
 }
 
-TcpListenSocket::TcpListenSocket(int fd, const Address::InstanceConstSharedPtr& address,
+TcpListenSocket::TcpListenSocket(IoHandlePtr io_handle,
+                                 const Address::InstanceConstSharedPtr& address,
                                  const Network::Socket::OptionsSharedPtr& options)
-    : ListenSocketImpl(fd, address) {
+    : ListenSocketImpl(std::move(io_handle), address) {
   setListenSocketOptions(options);
 }
 
 UdsListenSocket::UdsListenSocket(const Address::InstanceConstSharedPtr& address)
     : ListenSocketImpl(address->socket(Address::SocketType::Stream), address) {
-  RELEASE_ASSERT(fd_ != -1, "");
+  RELEASE_ASSERT(!isClosed(), "");
   doBind();
 }
 
-UdsListenSocket::UdsListenSocket(int fd, const Address::InstanceConstSharedPtr& address)
-    : ListenSocketImpl(fd, address) {}
+UdsListenSocket::UdsListenSocket(IoHandlePtr io_handle,
+                                 const Address::InstanceConstSharedPtr& address)
+    : ListenSocketImpl(std::move(io_handle), address) {}
 
 } // namespace Network
 } // namespace Envoy

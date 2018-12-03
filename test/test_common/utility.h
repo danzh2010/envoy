@@ -11,6 +11,7 @@
 #include "envoy/buffer/buffer.h"
 #include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/network/address.h"
+#include "envoy/network/io_handle.h"
 #include "envoy/stats/stats.h"
 #include "envoy/stats/store.h"
 #include "envoy/thread/thread.h"
@@ -335,11 +336,11 @@ private:
 
 class ScopedFdCloser {
 public:
-  ScopedFdCloser(int fd);
+  ScopedFdCloser(Network::IoHandle& io_handle);
   ~ScopedFdCloser();
 
 private:
-  int fd_;
+  Network::IoHandle& io_handle_;
 };
 
 /**

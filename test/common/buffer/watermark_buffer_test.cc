@@ -2,8 +2,12 @@
 
 #include "common/buffer/buffer_impl.h"
 #include "common/buffer/watermark_buffer.h"
+#include "common/network/io_handle_impl.h"
 
 #include "gtest/gtest.h"
+
+using Envoy::Network::FdIoHandleImpl;
+using Envoy::Network::IoHandle;
 
 namespace Envoy {
 namespace Buffer {
@@ -170,6 +174,8 @@ TEST_F(WatermarkBufferTest, MoveOneByte) {
 TEST_F(WatermarkBufferTest, WatermarkFdFunctions) {
   int pipe_fds[2] = {0, 0};
   ASSERT_EQ(0, pipe(pipe_fds));
+  Network::FdIoHandleImpl io_handles[2] = {Network::FdIoHandleImpl(pipe_fds[0]),
+                                           Network::FdIoHandleImpl(pipe_fds[1])};
 
   buffer_.add(TEN_BYTES, 10);
   buffer_.add(TEN_BYTES, 10);
@@ -178,7 +184,7 @@ TEST_F(WatermarkBufferTest, WatermarkFdFunctions) {
 
   int bytes_written_total = 0;
   while (bytes_written_total < 20) {
-    Api::SysCallIntResult result = buffer_.write(pipe_fds[1]);
+    Api::SysCallIntResult result = buffer_.write(io_handles[1]);
     if (result.rc_ < 0) {
       ASSERT_EQ(EAGAIN, result.errno_);
     } else {
@@ -191,7 +197,7 @@ TEST_F(WatermarkBufferTest, WatermarkFdFunctions) {
 
   int bytes_read_total = 0;
   while (bytes_read_total < 20) {
-    Api::SysCallIntResult result = buffer_.read(pipe_fds[0], 20);
+    Api::SysCallIntResult result = buffer_.read(io_handles[0], 20);
     bytes_read_total += result.rc_;
   }
   EXPECT_EQ(2, times_high_watermark_called_);

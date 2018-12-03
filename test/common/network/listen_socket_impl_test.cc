@@ -28,9 +28,9 @@ INSTANTIATE_TEST_CASE_P(IpVersions, ListenSocketImplTest,
 
 TEST_P(ListenSocketImplTest, BindSpecificPort) {
   // Pick a free port.
-  auto addr_fd = Network::Test::bindFreeLoopbackPort(version_, Address::SocketType::Stream);
-  auto addr = addr_fd.first;
-  EXPECT_LE(0, addr_fd.second);
+  auto addr_io_handle = Network::Test::bindFreeLoopbackPort(version_, Address::SocketType::Stream);
+  auto addr = addr_io_handle.first;
+  EXPECT_FALSE(addr_io_handle.second->isClosed());
 
   // Confirm that we got a reasonable address and port.
   ASSERT_EQ(Address::Type::Ip, addr->type());
@@ -42,7 +42,7 @@ TEST_P(ListenSocketImplTest, BindSpecificPort) {
   // should bind to our assigned port during the interval between closing the fd and re-binding.
   // TODO(jamessynge): Consider adding a loop or other such approach to this test so that a
   // bind failure (in the TcpListenSocket ctor) once isn't considered an error.
-  EXPECT_EQ(0, close(addr_fd.second));
+  EXPECT_EQ(0, addr_io_handle.second->close().rc_);
 
   auto option = std::make_unique<MockSocketOption>();
   auto options = std::make_shared<std::vector<Network::Socket::OptionConstSharedPtr>>();
@@ -50,7 +50,7 @@ TEST_P(ListenSocketImplTest, BindSpecificPort) {
       .WillOnce(Return(true));
   options->emplace_back(std::move(option));
   TcpListenSocket socket1(addr, options, true);
-  EXPECT_EQ(0, listen(socket1.fd(), 0));
+  EXPECT_EQ(0, socket1.ioHandle().listen(0).rc_);
   EXPECT_EQ(addr->ip()->port(), socket1.localAddress()->ip()->port());
   EXPECT_EQ(addr->ip()->addressAsString(), socket1.localAddress()->ip()->addressAsString());
 
@@ -63,7 +63,7 @@ TEST_P(ListenSocketImplTest, BindSpecificPort) {
   EXPECT_THROW(Network::TcpListenSocket socket2(addr, options2, true), EnvoyException);
 
   // Test the case of a socket with fd and given address and port.
-  TcpListenSocket socket3(dup(socket1.fd()), addr, nullptr);
+  TcpListenSocket socket3(socket1.ioHandle().dup(), addr, nullptr);
   EXPECT_EQ(addr->asString(), socket3.localAddress()->asString());
 }
 

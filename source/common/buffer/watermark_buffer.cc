@@ -2,6 +2,8 @@
 
 #include "common/common/assert.h"
 
+using Envoy::Network::IoHandle;
+
 namespace Envoy {
 namespace Buffer {
 
@@ -50,8 +52,8 @@ void WatermarkBuffer::move(Instance& rhs, uint64_t length) {
   checkHighWatermark();
 }
 
-Api::SysCallIntResult WatermarkBuffer::read(int fd, uint64_t max_length) {
-  Api::SysCallIntResult result = OwnedImpl::read(fd, max_length);
+Api::SysCallIntResult WatermarkBuffer::read(IoHandle& io_handle, uint64_t max_length) {
+  Api::SysCallIntResult result = OwnedImpl::read(io_handle, max_length);
   checkHighWatermark();
   return result;
 }
@@ -62,8 +64,8 @@ uint64_t WatermarkBuffer::reserve(uint64_t length, RawSlice* iovecs, uint64_t nu
   return bytes_reserved;
 }
 
-Api::SysCallIntResult WatermarkBuffer::write(int fd) {
-  Api::SysCallIntResult result = OwnedImpl::write(fd);
+Api::SysCallIntResult WatermarkBuffer::write(IoHandle& io_handle) {
+  Api::SysCallIntResult result = OwnedImpl::write(io_handle);
   checkLowWatermark();
   return result;
 }

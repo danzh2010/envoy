@@ -9,6 +9,8 @@
 
 #include "event2/buffer.h"
 
+using Envoy::Network::IoHandle;
+
 namespace Envoy {
 namespace Buffer {
 
@@ -107,7 +109,7 @@ void OwnedImpl::move(Instance& rhs, uint64_t length) {
   static_cast<LibEventInstance&>(rhs).postProcess();
 }
 
-Api::SysCallIntResult OwnedImpl::read(int fd, uint64_t max_length) {
+Api::SysCallIntResult OwnedImpl::read(IoHandle& io_handle, uint64_t max_length) {
   if (max_length == 0) {
     return {0, 0};
   }
@@ -126,9 +128,8 @@ Api::SysCallIntResult OwnedImpl::read(int fd, uint64_t max_length) {
   }
   ASSERT(num_slices_to_read <= MaxSlices);
   ASSERT(num_bytes_to_read <= max_length);
-  auto& os_syscalls = Api::OsSysCallsSingleton::get();
   const Api::SysCallSizeResult result =
-      os_syscalls.readv(fd, iov.begin(), static_cast<int>(num_slices_to_read));
+      io_handle.readv(iov.begin(), static_cast<int>(num_slices_to_read));
   if (result.rc_ < 0) {
     return {static_cast<int>(result.rc_), result.errno_};
   }
@@ -165,7 +166,7 @@ ssize_t OwnedImpl::search(const void* data, uint64_t size, size_t start) const {
   return result_ptr.pos;
 }
 
-Api::SysCallIntResult OwnedImpl::write(int fd) {
+Api::SysCallIntResult OwnedImpl::write(IoHandle& io_handle) {
   constexpr uint64_t MaxSlices = 16;
   RawSlice slices[MaxSlices];
   const uint64_t num_slices = std::min(getRawSlices(slices, MaxSlices), MaxSlices);
@@ -181,8 +182,7 @@ Api::SysCallIntResult OwnedImpl::write(int fd) {
   if (num_slices_to_write == 0) {
     return {0, 0};
   }
-  auto& os_syscalls = Api::OsSysCallsSingleton::get();
-  const Api::SysCallSizeResult result = os_syscalls.writev(fd, iov.begin(), num_slices_to_write);
+  const Api::SysCallSizeResult result = io_handle.writev(iov.begin(), num_slices_to_write);
   if (result.rc_ > 0) {
     drain(static_cast<uint64_t>(result.rc_));
   }

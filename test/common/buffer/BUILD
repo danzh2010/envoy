@@ -34,6 +34,7 @@ envoy_cc_test(
     srcs = ["owned_impl_test.cc"],
     deps = [
         "//source/common/buffer:buffer_lib",
+        "//source/common/network:io_handle_lib",
         "//test/mocks/api:api_mocks",
         "//test/test_common:threadsafe_singleton_injector_lib",
     ],
@@ -45,6 +46,7 @@ envoy_cc_test(
     deps = [
         "//source/common/buffer:buffer_lib",
         "//source/common/buffer:watermark_buffer_lib",
+        "//source/common/network:io_handle_lib",
     ],
 )
 
