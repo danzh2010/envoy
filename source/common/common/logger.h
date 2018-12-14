@@ -35,6 +35,7 @@ namespace Logger {
   FUNCTION(health_checker)       \
   FUNCTION(http)                 \
   FUNCTION(http2)                \
+  FUNCTION(quic)                 \
   FUNCTION(hystrix)              \
   FUNCTION(lua)                  \
   FUNCTION(main)                 \
