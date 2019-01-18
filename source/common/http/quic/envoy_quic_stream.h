@@ -1,3 +1,9 @@
+
+
+namespace Envoy {
+namespace Http {
+namespace Quic {
+
 /*
  * Interface to communicate with Envoy about incoming headers, body and
  * trailers.
@@ -24,13 +30,13 @@ public:
 
   virtual void writeTrailers(const HeaderMap& trailers) PURE;
 
-  void setCallback(EnvoyQuicStreamCallbacksPtr callback) {
-    callback_ = std::move(callback);
-  }
+  void setCallback(EnvoyQuicStreamCallbacksPtr callback) { callback_ = std::move(callback); }
 
 private:
   // To be used when quic stream receives headers, body and trailers.
   EnvoyQuicStreamCallbacksPtr callback_;
 };
 
-
+} // namespace Quic
+} // namespace Http
+} // namespace Envoy

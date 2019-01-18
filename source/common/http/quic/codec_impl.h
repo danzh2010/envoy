@@ -17,7 +17,7 @@ class ConnectionImplBase : public virtual Connection,
                            protected Logger::Loggable<Logger::Id::quic>,
                            EnvoyQuicConnectionCallback {
 public:
-  ConnectionImplBase(Network::Connection& connection) : connection_(connection) {};
+  ConnectionImplBase(Network::Connection& connection) : connection_(connection){};
 
   ~ConnectionImplBase() override;
 
@@ -25,9 +25,7 @@ public:
   void dispatch(Buffer::Instance& data) override {
     // No-op. Currently data should come from EnvoyQuicStreamCallbacks.
   }
-  void goAway() override {
-    quic_connection_.sendGoAway();
-  }
+  void goAway() override { quic_connection_.sendGoAway(); }
   Protocol protocol() override { return Protocol::Quic; }
   void shutdownNotice() override {
     // To be implemented.
@@ -116,7 +114,6 @@ private:
   StreamDecoder& decoder_;
   EnvoyQuicStreamBase& quic_stream_;
 };
-
 
 } // namespace Quic
 } // namespace Http

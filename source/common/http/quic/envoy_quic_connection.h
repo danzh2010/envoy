@@ -1,4 +1,8 @@
 
+namespace Envoy {
+namespace Http {
+namespace Quic {
+
 /*
  * Used to notify Envoy quic's status change.
  */
@@ -15,11 +19,12 @@ class EnvoyQuicConnectionBase {
 public:
   virtual void sendGoAway() PURE;
 
-  void set_callback(EnvoyQuicConnectionCallbackPtr callback) {
-    callback_ = callback;
-  }
+  void set_callback(EnvoyQuicConnectionCallbackPtr callback) { callback_ = callback; }
 
 private:
   EnvoyQuicConnectionCallbackPtr callback_;
 };
 
+} // namespace Quic
+} // namespace Http
+} // namespace Envoy

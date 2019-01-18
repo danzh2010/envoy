@@ -18,21 +18,20 @@ void ConnectionImplBase::onConnectionClosed(string reason) PURE;
 
 void StreamImpl::onHeaders(HeaderMap& headers) {
   // Fake a POST request.
-  auto request_headers = absl::make_unique<HeaderMapImpl>({
-      {Http::Headers::get().Method, "POST"},
-      {Http::Headers::get().Host, ""},
-      {Http::Headers::get().Path, "/foo"}});
-   decoder_.decodeHeaders(std::move(headers), false);
-}false
+  auto request_headers = absl::make_unique<HeaderMapImpl>({{Http::Headers::get().Method, "POST"},
+                                                           {Http::Headers::get().Host, ""},
+                                                           {Http::Headers::get().Path, "/foo"}});
+  decoder_.decodeHeaders(std::move(headers), false);
+}
+false
 
-void StreamImpl::onData(Buffer::Instance& data, bool end_stream) {
+    void
+    StreamImpl::onData(Buffer::Instance& data, bool end_stream) {
   decoder_.decodeData(data, end);
-
 }
 
 void StreamImpl::onTrailers(HeaderMap& trailers) {
-  auto request_trailers = absl::make_unique<HeaderMapImpl>({
-      {"trailer_key", "trailer_value"}});
+  auto request_trailers = absl::make_unique<HeaderMapImpl>({{"trailer_key", "trailer_value"}});
   decoder_.decodeTrailers(std::move(trailers));
 }
 
@@ -44,9 +43,7 @@ void StreamImpl::encodeData(Buffer::Instance& data, bool end_stream) {
   quic_stream_.writeBody(data, end_stream);
 }
 
-void StreamImpl::encodeTrailers(const HeaderMap& trailers) {
-  quic_stream_.writeTrailers(trailers);
-}
+void StreamImpl::encodeTrailers(const HeaderMap& trailers) { quic_stream_.writeTrailers(trailers); }
 
 } // namespace Quic
 } // namespace Http
