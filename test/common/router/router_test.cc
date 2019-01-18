@@ -6,6 +6,7 @@
 #include "common/common/empty_string.h"
 #include "common/config/metadata.h"
 #include "common/config/well_known_names.h"
+#include "common/http/context_impl.h"
 #include "common/network/utility.h"
 #include "common/router/config_impl.h"
 #include "common/router/router.h"
@@ -35,6 +36,7 @@ using testing::AssertionSuccess;
 using testing::AtLeast;
 using testing::InSequence;
 using testing::Invoke;
+using testing::Matcher;
 using testing::MockFunction;
 using testing::NiceMock;
 using testing::Ref;
@@ -77,7 +79,7 @@ public:
       : shadow_writer_(new MockShadowWriter()),
         config_("test.", local_info_, stats_store_, cm_, runtime_, random_,
                 ShadowWriterPtr{shadow_writer_}, true, start_child_span, suppress_envoy_headers,
-                test_time_.timeSystem()),
+                test_time_.timeSystem(), http_context_),
         router_(config_) {
     router_.setDecoderFilterCallbacks(callbacks_);
     upstream_locality_.set_zone("to_az");
@@ -181,6 +183,28 @@ public:
     router_.onDestroy();
   }
 
+  void sendRequest(bool end_stream = true) {
+    if (end_stream) {
+      EXPECT_CALL(callbacks_.dispatcher_, createTimer_(_)).Times(1);
+    }
+    EXPECT_CALL(cm_.conn_pool_, newStream(_, _))
+        .WillOnce(Invoke(
+            [&](Http::StreamDecoder& decoder,
+                Http::ConnectionPool::Callbacks& callbacks) -> Http::ConnectionPool::Cancellable* {
+              response_decoder_ = &decoder;
+              callbacks.onPoolReady(original_encoder_, cm_.conn_pool_.host_);
+              return nullptr;
+            }));
+    HttpTestUtility::addDefaultHeaders(default_request_headers_);
+    router_.decodeHeaders(default_request_headers_, end_stream);
+  }
+
+  void enableRedirects() {
+    ON_CALL(callbacks_.route_->route_entry_, internalRedirectAction())
+        .WillByDefault(Return(InternalRedirectAction::Handle));
+    ON_CALL(callbacks_, connection()).WillByDefault(Return(&connection_));
+  }
+
   DangerousDeprecatedTestTime test_time_;
   std::string upstream_zone_{"to_az"};
   envoy::api::v2::core::Locality upstream_locality_;
@@ -189,6 +213,7 @@ public:
   NiceMock<Runtime::MockLoader> runtime_;
   NiceMock<Runtime::MockRandomGenerator> random_;
   Http::ConnectionPool::MockCancellable cancellable_;
+  Http::ContextImpl http_context_;
   NiceMock<Http::MockStreamDecoderFilterCallbacks> callbacks_;
   MockShadowWriter* shadow_writer_;
   NiceMock<LocalInfo::MockLocalInfo> local_info_;
@@ -198,6 +223,13 @@ public:
   Event::MockTimer* per_try_timeout_{};
   Network::Address::InstanceConstSharedPtr host_address_{
       Network::Utility::resolveUrl("tcp://10.0.0.5:9211")};
+  NiceMock<Http::MockStreamEncoder> original_encoder_;
+  NiceMock<Http::MockStreamEncoder> second_encoder_;
+  NiceMock<Network::MockConnection> connection_;
+  Http::StreamDecoder* response_decoder_ = nullptr;
+  Http::TestHeaderMapImpl default_request_headers_{};
+  Http::HeaderMapPtr redirect_headers_{
+      new Http::TestHeaderMapImpl{{":status", "302"}, {"location", "http://www.foo.com"}}};
 };
 
 class RouterTest : public RouterTestBase {
@@ -1893,6 +1925,137 @@ TEST_F(RouterTest, RetryRespectsRetryHostPredicate) {
   EXPECT_TRUE(verifyHostUpstreamStats(1, 1));
 }
 
+TEST_F(RouterTest, InternalRedirectRejectedOnSecondPass) {
+  enableRedirects();
+  default_request_headers_.insertEnvoyOriginalUrl().value(std::string("http://www.foo.com"));
+  sendRequest();
+
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+
+  Buffer::OwnedImpl data("1234567890");
+  response_decoder_->decodeData(data, true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, InternalRedirectRejectedWithEmptyLocation) {
+  enableRedirects();
+  sendRequest();
+
+  redirect_headers_->insertLocation().value(std::string(""));
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+
+  Buffer::OwnedImpl data("1234567890");
+  response_decoder_->decodeData(data, true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, InternalRedirectRejectedWithInvalidLocation) {
+  enableRedirects();
+  sendRequest();
+
+  redirect_headers_->insertLocation().value(std::string("h"));
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+
+  Buffer::OwnedImpl data("1234567890");
+  response_decoder_->decodeData(data, true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, InternalRedirectRejectedWithoutCompleteRequest) {
+  enableRedirects();
+
+  sendRequest(false);
+
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+
+  Buffer::OwnedImpl data("1234567890");
+  response_decoder_->decodeData(data, true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, InternalRedirectRejectedWithoutLocation) {
+  enableRedirects();
+
+  sendRequest();
+
+  redirect_headers_->removeLocation();
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+  Buffer::OwnedImpl data("1234567890");
+  response_decoder_->decodeData(data, true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, InternalRedirectRejectedWithBody) {
+  enableRedirects();
+
+  sendRequest();
+
+  EXPECT_CALL(callbacks_, decodingBuffer()).Times(1);
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+  Buffer::OwnedImpl data("1234567890");
+  response_decoder_->decodeData(data, true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, InternalRedirectRejectedWithCrossSchemeRedirect) {
+  enableRedirects();
+
+  sendRequest();
+
+  redirect_headers_->insertLocation().value(std::string("https://www.foo.com"));
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), true);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_failed_total")
+                    .value());
+}
+
+TEST_F(RouterTest, HttpInternalRedirectSucceeded) {
+  enableRedirects();
+  default_request_headers_.insertForwardedProto().value(std::string("http"));
+  sendRequest();
+
+  EXPECT_CALL(callbacks_, decodingBuffer()).Times(1);
+  EXPECT_CALL(callbacks_, recreateStream()).Times(1).WillOnce(Return(true));
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_succeeded_total")
+                    .value());
+
+  // In production, the HCM recreateStream would have called this.
+  router_.onDestroy();
+}
+
+TEST_F(RouterTest, HttpsInternalRedirectSucceeded) {
+  Ssl::MockConnection ssl_connection;
+  enableRedirects();
+
+  sendRequest();
+
+  redirect_headers_->insertLocation().value(std::string("https://www.foo.com"));
+  EXPECT_CALL(connection_, ssl()).Times(1).WillOnce(Return(&ssl_connection));
+  EXPECT_CALL(callbacks_, decodingBuffer()).Times(1);
+  EXPECT_CALL(callbacks_, recreateStream()).Times(1).WillOnce(Return(true));
+  response_decoder_->decodeHeaders(std::move(redirect_headers_), false);
+  EXPECT_EQ(1U, cm_.thread_local_cluster_.cluster_.info_->stats_store_
+                    .counter("upstream_internal_redirect_succeeded_total")
+                    .value());
+
+  // In production, the HCM recreateStream would have called this.
+  router_.onDestroy();
+}
+
 TEST_F(RouterTest, Shadow) {
   callbacks_.route_->route_entry_.shadow_policy_.cluster_ = "foo";
   callbacks_.route_->route_entry_.shadow_policy_.runtime_key_ = "bar";
@@ -2344,6 +2507,21 @@ TEST(RouterFilterUtilityTest, ShouldShadow) {
     NiceMock<Runtime::MockLoader> runtime;
     EXPECT_CALL(runtime.snapshot_, featureEnabled("foo", 0, 5, 10000)).WillOnce(Return(true));
     EXPECT_TRUE(FilterUtility::shouldShadow(policy, runtime, 5));
+  }
+  // Use default value instead of runtime key.
+  {
+    TestShadowPolicy policy;
+    envoy::type::FractionalPercent fractional_percent;
+    fractional_percent.set_numerator(5);
+    fractional_percent.set_denominator(envoy::type::FractionalPercent::TEN_THOUSAND);
+    policy.cluster_ = "cluster";
+    policy.runtime_key_ = "foo";
+    policy.default_value_ = fractional_percent;
+    NiceMock<Runtime::MockLoader> runtime;
+    EXPECT_CALL(runtime.snapshot_,
+                featureEnabled("foo", Matcher<const envoy::type::FractionalPercent&>(_), 3))
+        .WillOnce(Return(true));
+    EXPECT_TRUE(FilterUtility::shouldShadow(policy, runtime, 3));
   }
 }
 
