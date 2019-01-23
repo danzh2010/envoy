@@ -8,13 +8,26 @@ namespace Quic {
 
 void ConnectionImplBase::goAway() override { quic_connection_.sendGoAway(); }
 
-StreamImplPtr ServerConnectionImpl::createActiveStream(size_t stream_id) {
+void ConnectionImplBase::onConnectionClosed(string reason) {
+  // To be implemented.
+}
+
+StreamImplPtr ServerConnectionImpl::onNewStream(EnvoyQuicStreamBase& quic_stream) {
   StreamImplPtr stream(new StreamImpl(*this));
-  stream->decoder_ = callbacks_.newStream(*stream);
+  stream->set_decoder(callbacks_.newStream(*stream));
+  stream->set_quic_stream(quic_stream);
+  quic_stream.setCallbacks(std::move(stream));
   return stream;
 }
 
-void ConnectionImplBase::onConnectionClosed(string reason) PURE;
+Http::StreamEncoder& ClientConnectionImpl::newStream(StreamDecoder& response_decoder) {
+  StreamImplPtr stream(new StreamImpl(*this));
+  stream->set_decoder(response_decoder);
+  EnvoyQuicStreamBase& quic_stream = quic_connection_.createNewStream();
+  quic_stream.setCallbacks(std::move(stream));
+  stream->set_quic_stream(quic_stream);
+  return *stream;
+}
 
 void StreamImpl::onHeaders(HeaderMap& headers) {
   // Fake a POST request.

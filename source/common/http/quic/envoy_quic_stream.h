@@ -1,4 +1,5 @@
-
+#include "envoy/buffer/buffer.h"
+#include "envoy/http/header_map.h"
 
 namespace Envoy {
 namespace Http {
@@ -27,14 +28,18 @@ public:
 
   // Take over all the data.
   virtual void writeBody(Buffer::Instance& data, bool end_stream) PURE;
-
   virtual void writeTrailers(const HeaderMap& trailers) PURE;
 
-  void setCallback(EnvoyQuicStreamCallbacksPtr callback) { callback_ = std::move(callback); }
+  // Notify Envoy through callback.
+  void onHeadersComplete(HeaderMap& headers);
+  void onData(Buffer::Instance& data, bool end_stream);
+  void onTrailersComplete(HeaderMap& trailers);
+
+  void setCallbacks(EnvoyQuicStreamCallbacksPtr callbacks) { callbacks_ = std::move(callbacks); }
 
 private:
   // To be used when quic stream receives headers, body and trailers.
-  EnvoyQuicStreamCallbacksPtr callback_;
+  EnvoyQuicStreamCallbacksPtr callbacks_;
 };
 
 } // namespace Quic

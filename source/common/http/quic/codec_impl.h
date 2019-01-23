@@ -1,5 +1,5 @@
-#include "envoy/event/deferred_deletable.h"
 #include "envoy/http/codec.h"
+#include "envoy/http/header_map.h"
 #include "envoy/network/connection.h"
 
 #include "common/buffer/buffer_impl.h"
@@ -25,7 +25,7 @@ public:
   void dispatch(Buffer::Instance& data) override {
     // No-op. Currently data should come from EnvoyQuicStreamCallbacks.
   }
-  void goAway() override { quic_connection_.sendGoAway(); }
+  void goAway() override;
   Protocol protocol() override { return Protocol::Quic; }
   void shutdownNotice() override {
     // To be implemented.
@@ -44,38 +44,39 @@ public:
   }
 
   // EnvoyQuicConnectionCallback
-  StreamImplPtr createActiveStream(size_t stream_id) override;
-
   void onConnectionClosed(string reason) override;
 
-private:
+protected:
   EnvoyQuicConnectionBase& quic_connection_;
 };
 
-class ServerConnectionImpl : public ServerConnection, public ConnectionImplBase {
+class StreamImpl;
+typedef std::unique_ptr<StreamImpl> StreamImplPtr;
+
+class ServerConnectionImpl : public ServerConnection,
+                             public ConnectionImplBase,
+                             public EnvoyQuicServerConnectionCallback {
 public:
   ServerConnectionImpl(Network::Connection& connection, ServerConnectionCallbacks& callbacks);
 
-protected:
-  void processData(Buffer::Instance& data) override;
+  // Implements EnvoyQuicServerConnectionCallback.
+  StreamImplPtr onNewStream(size_t stream_id) override;
 
 private:
-  ServerConnectionCallbacks& callbacks_;
+  Http::ServerConnectionCallbacks& callbacks_;
 };
 
 class ClientConnectionImpl : public ClientConnection, public ConnectionImplBase {
 public:
   ClientConnectionImpl(Network::Connection& connection, ConnectionCallbacks& callbacks);
 
-  // Http::ClientConnection
+  // Implements Http::ClientConnection
   Http::StreamEncoder& newStream(StreamDecoder& response_decoder) override;
 
-private:
-  // ConnectionImpl
+  // Implements ConnectionImpl
   ConnectionCallbacks& callbacks() override { return callbacks_; }
-  int onBeginHeaders(const nghttp2_frame* frame) override;
-  int onHeader(const nghttp2_frame* frame, HeaderString&& name, HeaderString&& value) override;
 
+private:
   Http::ConnectionCallbacks& callbacks_;
 };
 
@@ -88,7 +89,7 @@ class StreamImpl : public Stream,
                    public StreamCallbackHelper,
                    public EnvoyQuicStreamCallbacks {
 public:
-  StreamImple(ConnectionImpl& parent) : parent_(parent) {}
+  StreamImpl(ConnectionImpl& parent) : parent_(parent) {}
 
   // Http::StreamEncoder
   void encode100ContinueHeaders(const HeaderMap& headers) override;
@@ -109,6 +110,9 @@ public:
   void onHeaders(HeaderMap& headers);
   void onData(Buffer::Instance& data, bool end_stream);
   void onTrailers(HeaderMap& trailers);
+
+  void setDecoder(StreamDecoder& decoder) { decoder_ = decoder; }
+  void setQuicStream(EnvoyQuicStreamBase& quic_stream) { quic_stream_ = quic_stream; }
 
 private:
   StreamDecoder& decoder_;
