@@ -1,5 +1,5 @@
-#include "source/common/http/quic/envoy_quic_connection.h"
-#include "source/common/http/quic/envoy_quic_stream.h"
+#include "common/http/quic/envoy_quic_connection.h"
+#include "common/http/quic/envoy_quic_stream.h"
 
 namespace Envoy {
 namespace Http {
@@ -12,6 +12,7 @@ public:
   MOCK_METHOD1(writeTrailers, void(const HeaderMap& trailers));
 };
 
+// Test quic connection which only has one stream.
 class MockEnvoyQuicConnection : public EnvoyQuicConnectionBase {
 public:
   MOCK_METHOD0(sendGoAway, void());

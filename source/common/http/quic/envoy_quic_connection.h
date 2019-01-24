@@ -1,19 +1,23 @@
-#include "source/common/http/quic/envoy_quic_stream.h"
+#pragma once
+
+#include "common/http/quic/envoy_quic_stream.h"
+
+#include <string>
 
 namespace Envoy {
 namespace Http {
 namespace Quic {
+
+class StreamImpl;
+typedef std::unique_ptr<StreamImpl> StreamImplPtr;
 
 /*
  * Interface to communicate with Envoy about incoming connection status change.
  */
 class EnvoyQuicConnectionCallback {
 public:
-  virtual void onConnectionClosed(string reason) PURE;
-};
-
-class EnvoyQuicServerConnectionCallback : public EnvoyQuicConnectionCallback {
-public:
+  virtual ~EnvoyQuicConnectionCallback() {}
+  virtual void onConnectionClosed(std::string reason) PURE;
   virtual StreamImplPtr onNewStream(EnvoyQuicStreamBase& quic_stream) PURE;
 };
 
@@ -25,6 +29,8 @@ typedef std::unique_ptr<EnvoyQuicConnectionCallback> EnvoyQuicConnectionCallback
  */
 class EnvoyQuicConnectionBase {
 public:
+  virtual ~EnvoyQuicConnectionBase() {}
+
   // Tells quic to send GO_AWAY.
   virtual void sendGoAway() PURE;
 
@@ -35,12 +41,12 @@ public:
   void onNewStream(EnvoyQuicStreamBase& quic_stream);
 
   // Notify Envoy about connection close from either quic layer or remote.
-  void onConnectionClosed(string reason);
+  void onConnectionClosed(std::string reason);
 
-  void set_callback(EnvoyQuicConnectionCallbackPtr callback) { callback_ = callback; }
+  void set_callback(EnvoyQuicConnectionCallback* callback) { callback_ = callback; }
 
 private:
-  EnvoyQuicConnectionCallbackPtr callback_;
+  EnvoyQuicConnectionCallback* callback_;
 };
 
 } // namespace Quic

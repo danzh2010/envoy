@@ -1,3 +1,5 @@
+#pragma once
+
 #include "envoy/buffer/buffer.h"
 #include "envoy/http/header_map.h"
 
@@ -11,9 +13,11 @@ namespace Quic {
  */
 class EnvoyQuicStreamCallbacks {
 public:
-  virtual void onHeaders(HeaderMap& headers) PURE;
+  virtual ~EnvoyQuicStreamCallbacks() {}
+
+  virtual void onHeaders(HeaderMapPtr&& headers) PURE;
   virtual void onData(Buffer::Instance& data, bool end_stream) PURE;
-  virtual void onTrailers(HeaderMap& trailers) PURE;
+  virtual void onTrailers(HeaderMapPtr&& trailers) PURE;
 };
 
 typedef std::unique_ptr<EnvoyQuicStreamCallbacks> EnvoyQuicStreamCallbacksPtr;
@@ -24,6 +28,8 @@ typedef std::unique_ptr<EnvoyQuicStreamCallbacks> EnvoyQuicStreamCallbacksPtr;
  */
 class EnvoyQuicStreamBase {
 public:
+  virtual ~EnvoyQuicStreamBase() {}
+
   virtual void writeHeaders(const HeaderMap& headers, bool end_stream) PURE;
 
   // Take over all the data.
@@ -31,9 +37,9 @@ public:
   virtual void writeTrailers(const HeaderMap& trailers) PURE;
 
   // Notify Envoy through callback.
-  void onHeadersComplete(HeaderMap& headers);
+  void onHeadersComplete(HeaderMapPtr headers);
   void onData(Buffer::Instance& data, bool end_stream);
-  void onTrailersComplete(HeaderMap& trailers);
+  void onTrailersComplete(HeaderMapPtr trailers);
 
   void setCallbacks(EnvoyQuicStreamCallbacksPtr callbacks) { callbacks_ = std::move(callbacks); }
 

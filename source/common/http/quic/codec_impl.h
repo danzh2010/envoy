@@ -1,3 +1,5 @@
+#pragma once
+
 #include "envoy/http/codec.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/connection.h"
@@ -5,24 +7,35 @@
 #include "common/buffer/buffer_impl.h"
 #include "common/common/logger.h"
 #include "common/http/codec_helper.h"
+#include "common/http/quic/envoy_quic_connection.h"
+#include "common/http/quic/envoy_quic_stream.h"
+
+#include <string>
 
 namespace Envoy {
 namespace Http {
 namespace Quic {
+
+class EnvoyQuicConnectionBase;
+class EnvoyQuicStreamBase;
 
 /**
  * Base class for QUIC client and server codecs.
  */
 class ConnectionImplBase : public virtual Connection,
                            protected Logger::Loggable<Logger::Id::quic>,
-                           EnvoyQuicConnectionCallback {
+                           public EnvoyQuicConnectionCallback {
 public:
-  ConnectionImplBase(Network::Connection& connection) : connection_(connection){};
+  ConnectionImplBase() : quic_connection_(nullptr){};
 
-  ~ConnectionImplBase() override;
+  void setQuicConnection(EnvoyQuicConnectionBase* connection) {
+    quic_connection_ = connection;
+  }
 
-  // Http::Connection
-  void dispatch(Buffer::Instance& data) override {
+  ~ConnectionImplBase() override {}
+
+  // Implements Http::Connection.
+  void dispatch(Buffer::Instance& /*data*/) override {
     // No-op. Currently data should come from EnvoyQuicStreamCallbacks.
   }
   void goAway() override;
@@ -44,23 +57,28 @@ public:
   }
 
   // EnvoyQuicConnectionCallback
-  void onConnectionClosed(string reason) override;
+  void onConnectionClosed(std::string reason) override;
 
 protected:
-  EnvoyQuicConnectionBase& quic_connection_;
+  EnvoyQuicConnectionBase* quicConnection() {
+    return quic_connection_;
+  }
+
+private:
+  EnvoyQuicConnectionBase* quic_connection_;
 };
 
 class StreamImpl;
 typedef std::unique_ptr<StreamImpl> StreamImplPtr;
 
 class ServerConnectionImpl : public ServerConnection,
-                             public ConnectionImplBase,
-                             public EnvoyQuicServerConnectionCallback {
+                             public ConnectionImplBase {
 public:
-  ServerConnectionImpl(Network::Connection& connection, ServerConnectionCallbacks& callbacks);
+  ServerConnectionImpl(Network::Connection& connection,
+                       ServerConnectionCallbacks& callbacks);
 
-  // Implements EnvoyQuicServerConnectionCallback.
-  StreamImplPtr onNewStream(size_t stream_id) override;
+  // Implements EnvoyQuicConnectionCallback.
+  StreamImplPtr onNewStream(EnvoyQuicStreamBase& quic_stream) override;
 
 private:
   Http::ServerConnectionCallbacks& callbacks_;
@@ -70,11 +88,14 @@ class ClientConnectionImpl : public ClientConnection, public ConnectionImplBase 
 public:
   ClientConnectionImpl(Network::Connection& connection, ConnectionCallbacks& callbacks);
 
+  // Implements EnvoyQuicConnectionCallback.
+  StreamImplPtr onNewStream(EnvoyQuicStreamBase& /*quic_stream*/) override {
+    // Client does not support incoming stream.
+    ASSERT(false);
+  }
+
   // Implements Http::ClientConnection
   Http::StreamEncoder& newStream(StreamDecoder& response_decoder) override;
-
-  // Implements ConnectionImpl
-  ConnectionCallbacks& callbacks() override { return callbacks_; }
 
 private:
   Http::ConnectionCallbacks& callbacks_;
@@ -89,7 +110,7 @@ class StreamImpl : public Stream,
                    public StreamCallbackHelper,
                    public EnvoyQuicStreamCallbacks {
 public:
-  StreamImpl(ConnectionImpl& parent) : parent_(parent) {}
+  StreamImpl(ConnectionImplBase& parent, EnvoyQuicStreamBase& quic_stream) : parent_(parent), decoder_(nullptr), quic_stream_(quic_stream) {}
 
   // Http::StreamEncoder
   void encode100ContinueHeaders(const HeaderMap& headers) override;
@@ -97,7 +118,7 @@ public:
   void encodeData(Buffer::Instance& data, bool end_stream) override;
   void encodeTrailers(const HeaderMap& trailers) override;
   Stream& getStream() override { return *this; }
-  void encodeMetadata(const MetadataMap& metadata_map) override;
+  void encodeMetadata(const MetadataMapVector& metadata_map_vector) override;
 
   // Http::Stream
   void addCallbacks(StreamCallbacks& callbacks) override { addCallbacks_(callbacks); }
@@ -107,15 +128,15 @@ public:
   virtual uint32_t bufferLimit() override;
 
   // EnvoyQUicStreamCallbacks
-  void onHeaders(HeaderMap& headers);
+  void onHeaders(HeaderMapPtr&& headers);
   void onData(Buffer::Instance& data, bool end_stream);
-  void onTrailers(HeaderMap& trailers);
+  void onTrailers(HeaderMapPtr&& trailers);
 
-  void setDecoder(StreamDecoder& decoder) { decoder_ = decoder; }
-  void setQuicStream(EnvoyQuicStreamBase& quic_stream) { quic_stream_ = quic_stream; }
+  void setDecoder(StreamDecoder* decoder) { decoder_ = decoder; }
 
 private:
-  StreamDecoder& decoder_;
+  ConnectionImplBase& parent_;
+  StreamDecoder* decoder_;
   EnvoyQuicStreamBase& quic_stream_;
 };
 
