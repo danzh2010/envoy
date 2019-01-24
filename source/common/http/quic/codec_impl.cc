@@ -28,10 +28,6 @@ Http::StreamEncoder& ClientConnectionImpl::newStream(StreamDecoder& response_dec
 }
 
 void StreamImpl::onHeaders(HeaderMapPtr&& headers) {
-  // Fake a POST request.
-  HeaderMapImplPtr request_headers(new HeaderMapImpl{{Http::Headers::get().Method, "POST"},
-                                                     {Http::Headers::get().Host, ""},
-                                                     {Http::Headers::get().Path, "/foo"}});
   decoder_->decodeHeaders(std::move(headers), false);
 }
 
@@ -40,8 +36,6 @@ void StreamImpl::onData(Buffer::Instance& data, bool end_stream) {
 }
 
 void StreamImpl::onTrailers(HeaderMapPtr&& trailers) {
-  HeaderMapImplPtr request_trailers(
-      new HeaderMapImpl{{LowerCaseString("trailer_key"), "trailer_value"}});
   decoder_->decodeTrailers(std::move(trailers));
 }
 
