@@ -1,8 +1,8 @@
 #pragma once
 
-#include "common/http/quic/envoy_quic_stream.h"
-
 #include <string>
+
+#include "common/http/quic/envoy_quic_stream.h"
 
 namespace Envoy {
 namespace Http {

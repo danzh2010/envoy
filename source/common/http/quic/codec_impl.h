@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "envoy/http/codec.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/connection.h"
@@ -9,8 +11,6 @@
 #include "common/http/codec_helper.h"
 #include "common/http/quic/envoy_quic_connection.h"
 #include "common/http/quic/envoy_quic_stream.h"
-
-#include <string>
 
 namespace Envoy {
 namespace Http {
@@ -28,9 +28,7 @@ class ConnectionImplBase : public virtual Connection,
 public:
   ConnectionImplBase() : quic_connection_(nullptr){};
 
-  void setQuicConnection(EnvoyQuicConnectionBase* connection) {
-    quic_connection_ = connection;
-  }
+  void setQuicConnection(EnvoyQuicConnectionBase* connection) { quic_connection_ = connection; }
 
   ~ConnectionImplBase() override {}
 
@@ -60,9 +58,7 @@ public:
   void onConnectionClosed(std::string reason) override;
 
 protected:
-  EnvoyQuicConnectionBase* quicConnection() {
-    return quic_connection_;
-  }
+  EnvoyQuicConnectionBase* quicConnection() { return quic_connection_; }
 
 private:
   EnvoyQuicConnectionBase* quic_connection_;
@@ -71,11 +67,9 @@ private:
 class StreamImpl;
 typedef std::unique_ptr<StreamImpl> StreamImplPtr;
 
-class ServerConnectionImpl : public ServerConnection,
-                             public ConnectionImplBase {
+class ServerConnectionImpl : public ServerConnection, public ConnectionImplBase {
 public:
-  ServerConnectionImpl(Network::Connection& connection,
-                       ServerConnectionCallbacks& callbacks);
+  ServerConnectionImpl(Network::Connection& connection, ServerConnectionCallbacks& callbacks);
 
   // Implements EnvoyQuicConnectionCallback.
   StreamImplPtr onNewStream(EnvoyQuicStreamBase& quic_stream) override;
@@ -110,7 +104,8 @@ class StreamImpl : public Stream,
                    public StreamCallbackHelper,
                    public EnvoyQuicStreamCallbacks {
 public:
-  StreamImpl(ConnectionImplBase& parent, EnvoyQuicStreamBase& quic_stream) : parent_(parent), decoder_(nullptr), quic_stream_(quic_stream) {}
+  StreamImpl(ConnectionImplBase& parent, EnvoyQuicStreamBase& quic_stream)
+      : parent_(parent), decoder_(nullptr), quic_stream_(quic_stream) {}
 
   // Http::StreamEncoder
   void encode100ContinueHeaders(const HeaderMap& headers) override;
