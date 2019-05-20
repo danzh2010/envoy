@@ -104,7 +104,6 @@ envoy_cc_library(
         "quic_flag_utils_impl.h",
         "quic_flags_impl.h",
         "quic_iovec_impl.h",
-        "quic_logging_impl.h",
         "quic_map_util_impl.h",
         "quic_prefetch_impl.h",
         "quic_ptr_util_impl.h",
@@ -129,7 +128,6 @@ envoy_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":flags_impl_lib",
-        ":quic_platform_logging_impl_lib",
         ":string_utils_lib",
         "//source/common/common:assert_lib",
         "//source/common/common:byte_order_lib",
