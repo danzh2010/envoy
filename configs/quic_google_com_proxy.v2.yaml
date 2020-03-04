@@ -1,0 +1,89 @@
+static_resources:
+  listeners:
+  - address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 8009
+        protocol: udp
+    filter_chains:
+    - transport_socket:
+        name: envoy.transport_sockets.quic
+        typed_config:
+          "@type": type.googleapis.com/envoy.api.v2.auth.DownstreamTlsContext
+          common_tls_context:
+            tls_params:
+              tls_maximum_protocol_version: TLSv1_2
+            tls_certificates:
+            - certificate_chain:
+                filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/servercert.pem
+              private_key:
+                filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/serverkey.pem
+            validation_context:
+              trusted_ca:
+                filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/cacert.pem
+              verify_certificate_hash: 90:CA:A3:E0:B0:AD:8E:E6:4F:BC:11:6C:7B:E5:9D:35:11:2B:46:71:5F:4D:5C:52:85:37:23:08:38:28:B4:D6
+            alpn_protocols:
+            - h2
+            - http/1.1
+      filters:
+      - name: envoy.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.config.filter.network.http_connection_manager.v2.HttpConnectionManager
+          codec_type: HTTP3
+          stat_prefix: ingress_http3
+          route_config:
+            name: local_serving
+            virtual_hosts:
+            - name: google_host
+              domains: ["www.google.com"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  host_rewrite: www.google.com
+                  cluster: service_google
+            - name: local_host
+              domains: ["*"]
+              routes:
+              - match:
+                  path: "/secret"
+                direct_response:
+                  status: "200"
+                  body: {inline_string: "direct_response: You found it!"}
+              - match:
+                  prefix: "/"
+                direct_response:
+                  status: "200"
+                  body: {inline_string: "direct_response: Success!"}
+          http_filters:
+          - name: envoy.filters.http.router
+    udp_listener_config:
+      udp_listener_name: "quiche_quic_listener"
+    reuse_port: true
+  clusters:
+  - name: service_google
+    connect_timeout: 0.25s
+    type: LOGICAL_DNS
+    # Comment out the following line to test on v6 networks
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: service_google
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: www.google.com
+                port_value: 443
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        "@type": type.googleapis.com/envoy.api.v2.auth.UpstreamTlsContext
+        sni: www.google.com
+admin:
+  access_log_path: "/dev/null"
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 8081
