@@ -9,22 +9,23 @@ static_resources:
     - transport_socket:
         name: envoy.transport_sockets.quic
         typed_config:
-          "@type": type.googleapis.com/envoy.api.v2.auth.DownstreamTlsContext
-          common_tls_context:
-            tls_params:
-              tls_maximum_protocol_version: TLSv1_2
-            tls_certificates:
-            - certificate_chain:
-                filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/servercert.pem
-              private_key:
-                filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/serverkey.pem
-            validation_context:
-              trusted_ca:
-                filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/cacert.pem
-              verify_certificate_hash: 90:CA:A3:E0:B0:AD:8E:E6:4F:BC:11:6C:7B:E5:9D:35:11:2B:46:71:5F:4D:5C:52:85:37:23:08:38:28:B4:D6
-            alpn_protocols:
-            - h2
-            - http/1.1
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.quic.v3.QuicDownstreamTransport
+          downstream_tls_context:
+            common_tls_context:
+              tls_params:
+                tls_maximum_protocol_version: TLSv1_3
+              tls_certificates:
+              - certificate_chain:
+                  filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/servercert.pem
+                private_key:
+                  filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/serverkey.pem
+              validation_context:
+                trusted_ca:
+                  filename: /usr/local/google/home/danzh/git/envoy/test/config/integration/certs/cacert.pem
+                verify_certificate_hash: 90:CA:A3:E0:B0:AD:8E:E6:4F:BC:11:6C:7B:E5:9D:35:11:2B:46:71:5F:4D:5C:52:85:37:23:08:38:28:B4:D6
+              alpn_protocols:
+              - h2
+              - http/1.1
       filters:
       - name: envoy.http_connection_manager
         typed_config:
