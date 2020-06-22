@@ -5,6 +5,7 @@
 #include <list>
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "envoy/http/header_map.h"
 
@@ -25,28 +26,24 @@ public:                                                                         
   void append##name(absl::string_view data, absl::string_view delimiter) override {                \
     HeaderEntry& entry = maybeCreateInline(&inline_headers_.name##_, Headers::get().name);         \
     addSize(HeaderMapImpl::appendToHeader(entry.value(), data, delimiter));                        \
-    verifyByteSize();                                                                              \
   }                                                                                                \
   void setReference##name(absl::string_view value) override {                                      \
     HeaderEntry& entry = maybeCreateInline(&inline_headers_.name##_, Headers::get().name);         \
     updateSize(entry.value().size(), value.size());                                                \
     entry.value().setReference(value);                                                             \
-    verifyByteSize();                                                                              \
   }                                                                                                \
   void set##name(absl::string_view value) override {                                               \
     HeaderEntry& entry = maybeCreateInline(&inline_headers_.name##_, Headers::get().name);         \
     updateSize(entry.value().size(), value.size());                                                \
     entry.value().setCopy(value);                                                                  \
-    verifyByteSize();                                                                              \
   }                                                                                                \
   void set##name(uint64_t value) override {                                                        \
     HeaderEntry& entry = maybeCreateInline(&inline_headers_.name##_, Headers::get().name);         \
     subtractSize(inline_headers_.name##_->value().size());                                         \
     entry.value().setInteger(value);                                                               \
     addSize(inline_headers_.name##_->value().size());                                              \
-    verifyByteSize();                                                                              \
   }                                                                                                \
-  void remove##name() override { removeInline(&inline_headers_.name##_); }
+  size_t remove##name() override { return removeInline(&inline_headers_.name##_); }
 
 #define DEFINE_INLINE_HEADER_STRUCT(name) HeaderEntryImpl* name##_;
 
@@ -61,13 +58,22 @@ public:                                                                         
  */
 class HeaderMapImpl : public virtual HeaderMap, NonCopyable {
 public:
-  HeaderMapImpl();
   // The following "constructors" call virtual functions during construction and must use the
   // static factory pattern.
-  static void copyFrom(HeaderMapImpl& lhs, const HeaderMap& rhs);
-  static void
-  initFromInitList(HeaderMapImpl& new_header_map,
-                   const std::initializer_list<std::pair<LowerCaseString, std::string>>& values);
+  static void copyFrom(HeaderMap& lhs, const HeaderMap& rhs);
+  // The value_type of iterator must be pair, and the first value of them must be LowerCaseString.
+  // If not, it won't be compiled successfully.
+  template <class It> static void initFromInitList(HeaderMap& new_header_map, It begin, It end) {
+    for (auto it = begin; it != end; ++it) {
+      static_assert(std::is_same<decltype(it->first), LowerCaseString>::value,
+                    "iterator must be pair and the first value of them must be LowerCaseString");
+      HeaderString key_string;
+      key_string.setCopy(it->first.get().c_str(), it->first.get().size());
+      HeaderString value_string;
+      value_string.setCopy(it->second.c_str(), it->second.size());
+      new_header_map.addViaMove(std::move(key_string), std::move(value_string));
+    }
+  }
 
   // Performs a manual byte size count for test verification.
   void verifyByteSizeInternalForTest() const;
@@ -91,8 +97,8 @@ public:
   void iterateReverse(ConstIterateCb cb, void* context) const override;
   Lookup lookup(const LowerCaseString& key, const HeaderEntry** entry) const override;
   void clear() override;
-  void remove(const LowerCaseString& key) override;
-  void removePrefix(const LowerCaseString& key) override;
+  size_t remove(const LowerCaseString& key) override;
+  size_t removePrefix(const LowerCaseString& key) override;
   size_t size() const override { return headers_.size(); }
   bool empty() const override { return headers_.empty(); }
   void dumpState(std::ostream& os, int indent_level = 0) const override;
@@ -124,16 +130,24 @@ protected:
     HeaderEntryImpl** entry_;
     const LowerCaseString* key_;
   };
-  using EntryCb = StaticLookupResponse (*)(HeaderMapImpl&);
-  struct StaticLookupTable : public TrieLookupTable<EntryCb> {
+
+  /**
+   * Base class for a static lookup table that converts a string key into an O(1) header.
+   */
+  template <class T>
+  struct StaticLookupTable : public TrieLookupTable<StaticLookupResponse (*)(T&)> {
+    using HeaderMapType = T;
+
     StaticLookupTable();
-  };
-  virtual const StaticLookupTable& staticLookupTable() const;
 
-  struct AllInlineHeaders {
-    void clear() { memset(this, 0, sizeof(*this)); }
-
-    ALL_INLINE_HEADERS(DEFINE_INLINE_HEADER_STRUCT)
+    static absl::optional<StaticLookupResponse> lookup(T& header_map, absl::string_view key) {
+      auto entry = ConstSingleton<StaticLookupTable>::get().find(key);
+      if (entry != nullptr) {
+        return entry(header_map);
+      } else {
+        return absl::nullopt;
+      }
+    }
   };
 
   /**
@@ -212,46 +226,135 @@ protected:
                                      HeaderString&& value);
   HeaderEntry* getExisting(const LowerCaseString& key);
   HeaderEntryImpl* getExistingInline(absl::string_view key);
-  void removeInline(HeaderEntryImpl** entry);
+  size_t removeInline(HeaderEntryImpl** entry);
   void updateSize(uint64_t from_size, uint64_t to_size);
   void addSize(uint64_t size);
   void subtractSize(uint64_t size);
+  virtual absl::optional<StaticLookupResponse> staticLookup(absl::string_view) {
+    // TODO(mattklein123): Make this pure once HeaderMapImpl is a base class only.
+    return absl::nullopt;
+  }
+  virtual void clearInline() {
+    // TODO(mattklein123): Make this pure once HeaderMapImpl is a base class only.
+  }
 
-  AllInlineHeaders inline_headers_;
   HeaderList headers_;
   // This holds the internal byte size of the HeaderMap.
   uint64_t cached_byte_size_ = 0;
-  ALL_INLINE_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
-
-  // Needed so RequestHeaderStaticLookupTable can interact with inline_headers_.
-  friend class RequestHeaderMapImpl;
 };
 
 /**
  * Typed derived classes for all header map types.
- * TODO(mattklein123): In future changes we will be differentiating the implementation between
- * these classes to both fix bugs and improve performance.
  */
 class RequestHeaderMapImpl : public HeaderMapImpl, public RequestHeaderMap {
+public:
+  INLINE_REQ_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
+  INLINE_REQ_RESP_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
+
 protected:
-  struct RequestHeaderStaticLookupTable : public StaticLookupTable {
-    RequestHeaderStaticLookupTable();
+  // Explicit inline headers for the request header map.
+  // TODO(mattklein123): This is mostly copied between all of the concrete header map types.
+  // In a future change we can either get rid of O(1) headers completely, or it should be possible
+  // to statically register all O(1) headers and move to a single dynamically sized class where we
+  // we reference the O(1) headers in the table by an offset.
+  struct AllInlineHeaders {
+    AllInlineHeaders() { clear(); }
+    void clear() { memset(this, 0, sizeof(*this)); }
+
+    INLINE_REQ_HEADERS(DEFINE_INLINE_HEADER_STRUCT)
+    INLINE_REQ_RESP_HEADERS(DEFINE_INLINE_HEADER_STRUCT)
   };
-  const StaticLookupTable& staticLookupTable() const override;
+
+  absl::optional<StaticLookupResponse> staticLookup(absl::string_view key) override {
+    return StaticLookupTable<RequestHeaderMapImpl>::lookup(*this, key);
+  }
+  void clearInline() override { inline_headers_.clear(); }
+
+  AllInlineHeaders inline_headers_;
+
+  friend class HeaderMapImpl;
 };
+
 class RequestTrailerMapImpl : public HeaderMapImpl, public RequestTrailerMap {};
-class ResponseHeaderMapImpl : public HeaderMapImpl, public ResponseHeaderMap {};
-class ResponseTrailerMapImpl : public HeaderMapImpl, public ResponseTrailerMap {};
+
+class ResponseHeaderMapImpl : public HeaderMapImpl, public ResponseHeaderMap {
+public:
+  INLINE_RESP_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
+  INLINE_REQ_RESP_HEADERS(DEFINE_INLINE_HEADER_FUNCS)
+  INLINE_RESP_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_FUNCS)
+
+protected:
+  // Explicit inline headers for the response header map.
+  // TODO(mattklein123): This is mostly copied between all of the concrete header map types.
+  // In a future change we can either get rid of O(1) headers completely, or it should be possible
+  // to statically register all O(1) headers and move to a single dynamically sized class where we
+  // we reference the O(1) headers in the table by an offset.
+  struct AllInlineHeaders {
+    AllInlineHeaders() { clear(); }
+    void clear() { memset(this, 0, sizeof(*this)); }
+
+    INLINE_RESP_HEADERS(DEFINE_INLINE_HEADER_STRUCT)
+    INLINE_REQ_RESP_HEADERS(DEFINE_INLINE_HEADER_STRUCT)
+    INLINE_RESP_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_STRUCT)
+  };
+
+  absl::optional<StaticLookupResponse> staticLookup(absl::string_view key) override {
+    return StaticLookupTable<ResponseHeaderMapImpl>::lookup(*this, key);
+  }
+  void clearInline() override { inline_headers_.clear(); }
+
+  AllInlineHeaders inline_headers_;
+
+  friend class HeaderMapImpl;
+};
+
+class ResponseTrailerMapImpl : public HeaderMapImpl, public ResponseTrailerMap {
+public:
+  INLINE_RESP_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_FUNCS)
+
+protected:
+  // Explicit inline headers for the response trailer map.
+  // TODO(mattklein123): This is mostly copied between all of the concrete header map types.
+  // In a future change we can either get rid of O(1) headers completely, or it should be possible
+  // to statically register all O(1) headers and move to a single dynamically sized class where we
+  // reference the O(1) headers in the table by an offset.
+  struct AllInlineHeaders {
+    AllInlineHeaders() { clear(); }
+    void clear() { memset(this, 0, sizeof(*this)); }
+
+    INLINE_RESP_HEADERS_TRAILERS(DEFINE_INLINE_HEADER_STRUCT)
+  };
+
+  absl::optional<StaticLookupResponse> staticLookup(absl::string_view key) override {
+    return StaticLookupTable<ResponseTrailerMapImpl>::lookup(*this, key);
+  }
+  void clearInline() override { inline_headers_.clear(); }
+
+  AllInlineHeaders inline_headers_;
+
+  friend class HeaderMapImpl;
+};
 
 template <class T>
 std::unique_ptr<T>
 createHeaderMap(const std::initializer_list<std::pair<LowerCaseString, std::string>>& values) {
   auto new_header_map = std::make_unique<T>();
-  HeaderMapImpl::initFromInitList(*new_header_map, values);
+  HeaderMapImpl::initFromInitList(*new_header_map, values.begin(), values.end());
+  return new_header_map;
+}
+
+template <class T, class It> std::unique_ptr<T> createHeaderMap(It begin, It end) {
+  auto new_header_map = std::make_unique<T>();
+  HeaderMapImpl::initFromInitList(*new_header_map, begin, end);
   return new_header_map;
 }
 
 template <class T> std::unique_ptr<T> createHeaderMap(const HeaderMap& rhs) {
+  // TODO(mattklein123): Use of this function allows copying a request header map into a response
+  // header map, etc. which is probably not what we want. Unfortunately, we do this on purpose in
+  // a few places when dealing with gRPC headers/trailers conversions so it's not trivial to remove.
+  // We should revisit this to figure how to make this a bit safer as a non-intentional conversion
+  // may have surprising results with different O(1) headers, implementations, etc.
   auto new_header_map = std::make_unique<T>();
   HeaderMapImpl::copyFrom(*new_header_map, rhs);
   return new_header_map;

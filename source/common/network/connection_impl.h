@@ -46,7 +46,8 @@ public:
 class ConnectionImpl : public ConnectionImplBase, public TransportSocketCallbacks {
 public:
   ConnectionImpl(Event::Dispatcher& dispatcher, ConnectionSocketPtr&& socket,
-                 TransportSocketPtr&& transport_socket, bool connected);
+                 TransportSocketPtr&& transport_socket, StreamInfo::StreamInfo& stream_info,
+                 bool connected);
 
   ~ConnectionImpl() override;
 
@@ -68,6 +69,9 @@ public:
   const Address::InstanceConstSharedPtr& remoteAddress() const override {
     return socket_->remoteAddress();
   }
+  const Address::InstanceConstSharedPtr& directRemoteAddress() const override {
+    return socket_->directRemoteAddress();
+  }
   const Address::InstanceConstSharedPtr& localAddress() const override {
     return socket_->localAddress();
   }
@@ -78,7 +82,7 @@ public:
   void setBufferLimits(uint32_t limit) override;
   uint32_t bufferLimit() const override { return read_buffer_limit_; }
   bool localAddressRestored() const override { return socket_->localAddressRestored(); }
-  bool aboveHighWatermark() const override { return above_high_watermark_; }
+  bool aboveHighWatermark() const override { return write_buffer_above_high_watermark_; }
   const ConnectionSocket::OptionsSharedPtr& socketOptions() const override {
     return socket_->options();
   }
@@ -98,10 +102,10 @@ public:
   }
 
   // Network::TransportSocketCallbacks
-  IoHandle& ioHandle() override { return socket_->ioHandle(); }
+  IoHandle& ioHandle() final { return socket_->ioHandle(); }
   const IoHandle& ioHandle() const override { return socket_->ioHandle(); }
   Connection& connection() override { return *this; }
-  void raiseEvent(ConnectionEvent event) override;
+  void raiseEvent(ConnectionEvent event) final;
   // Should the read buffer be drained?
   bool shouldDrainReadBuffer() override {
     return read_buffer_limit_ > 0 && read_buffer_.length() >= read_buffer_limit_;
@@ -118,20 +122,33 @@ public:
   static uint64_t nextGlobalIdForTest() { return next_global_id_; }
 
 protected:
+  // A convenience function which returns true if
+  // 1) The read disable count is zero or
+  // 2) The read disable count is one due to the read buffer being overrun.
+  // In either case the consumer of the data would like to read from the buffer.
+  // If the read count is greater than one, or equal to one when the buffer is
+  // not overrun, then the consumer of the data has called readDisable, and does
+  // not want to read.
+  bool consumerWantsToRead();
+
   // Network::ConnectionImplBase
   void closeConnectionImmediately() override;
 
   void closeSocket(ConnectionEvent close_type);
 
-  void onLowWatermark();
-  void onHighWatermark();
+  void onReadBufferLowWatermark();
+  void onReadBufferHighWatermark();
+  void onWriteBufferLowWatermark();
+  void onWriteBufferHighWatermark();
 
   TransportSocketPtr transport_socket_;
   ConnectionSocketPtr socket_;
-  StreamInfo::StreamInfoImpl stream_info_;
+  StreamInfo::StreamInfo& stream_info_;
   FilterManagerImpl filter_manager_;
 
-  Buffer::OwnedImpl read_buffer_;
+  // Ensure that if the consumer of the data from this connection isn't
+  // consuming, that the connection eventually stops reading from the wire.
+  Buffer::WatermarkBuffer read_buffer_;
   // This must be a WatermarkBuffer, but as it is created by a factory the ConnectionImpl only has
   // a generic pointer.
   // It MUST be defined after the filter_manager_ as some filters may have callbacks that
@@ -170,8 +187,7 @@ private:
   uint64_t last_write_buffer_size_{};
   Buffer::Instance* current_write_buffer_{};
   uint32_t read_disable_count_{0};
-  bool read_enabled_ : 1;
-  bool above_high_watermark_ : 1;
+  bool write_buffer_above_high_watermark_ : 1;
   bool detect_early_close_ : 1;
   bool enable_half_close_ : 1;
   bool read_end_stream_raised_ : 1;
@@ -194,6 +210,9 @@ public:
 
   // Network::ClientConnection
   void connect() override;
+
+private:
+  StreamInfo::StreamInfoImpl stream_info_;
 };
 
 } // namespace Network

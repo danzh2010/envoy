@@ -1,9 +1,9 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 licenses(["notice"])  # Apache 2
 
 cc_library(
     name = "fuzzed_data_provider",
-    hdrs = ["utils/FuzzedDataProvider.h"],
-    # This is moving from lib/fuzzer/utils to include/fuzzer after LLVM 9.0.
-    include_prefix = "compiler_rt/fuzzer",
+    hdrs = ["fuzzer/utils/FuzzedDataProvider.h"],
     visibility = ["//visibility:public"],
 )

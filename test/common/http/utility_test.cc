@@ -123,6 +123,11 @@ TEST(HttpUtility, H2H1H2Request) {
   ASSERT_EQ(converted_headers, original_headers);
 }
 
+TEST(HttpUtility, ConnectBytestreamSpecialCased) {
+  TestRequestHeaderMapImpl headers = {{":method", "CONNECT"}, {":protocol", "bytestream"}};
+  ASSERT_FALSE(Utility::isH2UpgradeRequest(headers));
+}
+
 // Start with H1 style websocket response headers. Transform to H2 and back.
 TEST(HttpUtility, H1H2H1Response) {
   TestResponseHeaderMapImpl converted_headers = {
@@ -254,33 +259,35 @@ TEST(HttpUtility, createSslRedirectPath) {
 
 namespace {
 
-Http2Settings parseHttp2SettingsFromV2Yaml(const std::string& yaml) {
-  envoy::config::core::v3::Http2ProtocolOptions http2_protocol_options;
-  TestUtility::loadFromYamlAndValidate(yaml, http2_protocol_options);
-  return Utility::parseHttp2Settings(http2_protocol_options);
+envoy::config::core::v3::Http2ProtocolOptions parseHttp2OptionsFromV2Yaml(const std::string& yaml) {
+  envoy::config::core::v3::Http2ProtocolOptions http2_options;
+  TestUtility::loadFromYamlAndValidate(yaml, http2_options);
+  return ::Envoy::Http2::Utility::initializeAndValidateOptions(http2_options);
 }
 
 } // namespace
 
 TEST(HttpUtility, parseHttp2Settings) {
   {
-    auto http2_settings = parseHttp2SettingsFromV2Yaml("{}");
-    EXPECT_EQ(Http2Settings::DEFAULT_HPACK_TABLE_SIZE, http2_settings.hpack_table_size_);
-    EXPECT_EQ(Http2Settings::DEFAULT_MAX_CONCURRENT_STREAMS,
-              http2_settings.max_concurrent_streams_);
-    EXPECT_EQ(Http2Settings::DEFAULT_INITIAL_STREAM_WINDOW_SIZE,
-              http2_settings.initial_stream_window_size_);
-    EXPECT_EQ(Http2Settings::DEFAULT_INITIAL_CONNECTION_WINDOW_SIZE,
-              http2_settings.initial_connection_window_size_);
-    EXPECT_EQ(Http2Settings::DEFAULT_MAX_OUTBOUND_FRAMES, http2_settings.max_outbound_frames_);
-    EXPECT_EQ(Http2Settings::DEFAULT_MAX_OUTBOUND_CONTROL_FRAMES,
-              http2_settings.max_outbound_control_frames_);
-    EXPECT_EQ(Http2Settings::DEFAULT_MAX_CONSECUTIVE_INBOUND_FRAMES_WITH_EMPTY_PAYLOAD,
-              http2_settings.max_consecutive_inbound_frames_with_empty_payload_);
-    EXPECT_EQ(Http2Settings::DEFAULT_MAX_INBOUND_PRIORITY_FRAMES_PER_STREAM,
-              http2_settings.max_inbound_priority_frames_per_stream_);
-    EXPECT_EQ(Http2Settings::DEFAULT_MAX_INBOUND_WINDOW_UPDATE_FRAMES_PER_DATA_FRAME_SENT,
-              http2_settings.max_inbound_window_update_frames_per_data_frame_sent_);
+    using ::Envoy::Http2::Utility::OptionsLimits;
+    auto http2_options = parseHttp2OptionsFromV2Yaml("{}");
+    EXPECT_EQ(OptionsLimits::DEFAULT_HPACK_TABLE_SIZE, http2_options.hpack_table_size().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_MAX_CONCURRENT_STREAMS,
+              http2_options.max_concurrent_streams().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_INITIAL_STREAM_WINDOW_SIZE,
+              http2_options.initial_stream_window_size().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_INITIAL_CONNECTION_WINDOW_SIZE,
+              http2_options.initial_connection_window_size().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_MAX_OUTBOUND_FRAMES,
+              http2_options.max_outbound_frames().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_MAX_OUTBOUND_CONTROL_FRAMES,
+              http2_options.max_outbound_control_frames().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_MAX_CONSECUTIVE_INBOUND_FRAMES_WITH_EMPTY_PAYLOAD,
+              http2_options.max_consecutive_inbound_frames_with_empty_payload().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_MAX_INBOUND_PRIORITY_FRAMES_PER_STREAM,
+              http2_options.max_inbound_priority_frames_per_stream().value());
+    EXPECT_EQ(OptionsLimits::DEFAULT_MAX_INBOUND_WINDOW_UPDATE_FRAMES_PER_DATA_FRAME_SENT,
+              http2_options.max_inbound_window_update_frames_per_data_frame_sent().value());
   }
 
   {
@@ -290,11 +297,11 @@ max_concurrent_streams: 2
 initial_stream_window_size: 65535
 initial_connection_window_size: 65535
     )EOF";
-    auto http2_settings = parseHttp2SettingsFromV2Yaml(yaml);
-    EXPECT_EQ(1U, http2_settings.hpack_table_size_);
-    EXPECT_EQ(2U, http2_settings.max_concurrent_streams_);
-    EXPECT_EQ(65535U, http2_settings.initial_stream_window_size_);
-    EXPECT_EQ(65535U, http2_settings.initial_connection_window_size_);
+    auto http2_options = parseHttp2OptionsFromV2Yaml(yaml);
+    EXPECT_EQ(1U, http2_options.hpack_table_size().value());
+    EXPECT_EQ(2U, http2_options.max_concurrent_streams().value());
+    EXPECT_EQ(65535U, http2_options.initial_stream_window_size().value());
+    EXPECT_EQ(65535U, http2_options.initial_connection_window_size().value());
   }
 }
 
@@ -391,7 +398,7 @@ TEST(HttpUtility, getLastAddressFromXFF) {
 }
 
 TEST(HttpUtility, TestParseCookie) {
-  TestHeaderMapImpl headers{
+  TestRequestHeaderMapImpl headers{
       {"someheader", "10.0.0.1"},
       {"cookie", "somekey=somevalue; someotherkey=someothervalue"},
       {"cookie", "abc=def; token=abc123; Expires=Wed, 09 Jun 2021 10:18:14 GMT"},
@@ -403,10 +410,10 @@ TEST(HttpUtility, TestParseCookie) {
 }
 
 TEST(HttpUtility, TestParseCookieBadValues) {
-  TestHeaderMapImpl headers{{"cookie", "token1=abc123; = "},
-                            {"cookie", "token2=abc123;   "},
-                            {"cookie", "; token3=abc123;"},
-                            {"cookie", "=; token4=\"abc123\""}};
+  TestRequestHeaderMapImpl headers{{"cookie", "token1=abc123; = "},
+                                   {"cookie", "token2=abc123;   "},
+                                   {"cookie", "; token3=abc123;"},
+                                   {"cookie", "=; token4=\"abc123\""}};
 
   EXPECT_EQ(Utility::parseCookieValue(headers, "token1"), "abc123");
   EXPECT_EQ(Utility::parseCookieValue(headers, "token2"), "abc123");
@@ -415,7 +422,7 @@ TEST(HttpUtility, TestParseCookieBadValues) {
 }
 
 TEST(HttpUtility, TestParseCookieWithQuotes) {
-  TestHeaderMapImpl headers{
+  TestRequestHeaderMapImpl headers{
       {"someheader", "10.0.0.1"},
       {"cookie", "dquote=\"; quoteddquote=\"\"\""},
       {"cookie", "leadingdquote=\"foobar;"},
@@ -453,8 +460,9 @@ TEST(HttpUtility, SendLocalReply) {
 
   EXPECT_CALL(callbacks, encodeHeaders_(_, false));
   EXPECT_CALL(callbacks, encodeData(_, true));
-  Utility::sendLocalReply(false, callbacks, is_reset, Http::Code::PayloadTooLarge, "large",
-                          absl::nullopt, false);
+  Utility::sendLocalReply(
+      is_reset, callbacks,
+      Utility::LocalReplyData{false, Http::Code::PayloadTooLarge, "large", absl::nullopt, false});
 }
 
 TEST(HttpUtility, SendLocalGrpcReply) {
@@ -463,15 +471,16 @@ TEST(HttpUtility, SendLocalGrpcReply) {
 
   EXPECT_CALL(callbacks, encodeHeaders_(_, true))
       .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
-        EXPECT_EQ(headers.Status()->value().getStringView(), "200");
+        EXPECT_EQ(headers.getStatusValue(), "200");
         EXPECT_NE(headers.GrpcStatus(), nullptr);
-        EXPECT_EQ(headers.GrpcStatus()->value().getStringView(),
+        EXPECT_EQ(headers.getGrpcStatusValue(),
                   std::to_string(enumToInt(Grpc::Status::WellKnownGrpcStatus::Unknown)));
         EXPECT_NE(headers.GrpcMessage(), nullptr);
-        EXPECT_EQ(headers.GrpcMessage()->value().getStringView(), "large");
+        EXPECT_EQ(headers.getGrpcMessageValue(), "large");
       }));
-  Utility::sendLocalReply(true, callbacks, is_reset, Http::Code::PayloadTooLarge, "large",
-                          absl::nullopt, false);
+  Utility::sendLocalReply(
+      is_reset, callbacks,
+      Utility::LocalReplyData{true, Http::Code::PayloadTooLarge, "large", absl::nullopt, false});
 }
 
 TEST(HttpUtility, SendLocalGrpcReplyWithUpstreamJsonPayload) {
@@ -489,16 +498,17 @@ TEST(HttpUtility, SendLocalGrpcReplyWithUpstreamJsonPayload) {
 
   EXPECT_CALL(callbacks, encodeHeaders_(_, true))
       .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
-        EXPECT_EQ(headers.Status()->value().getStringView(), "200");
+        EXPECT_EQ(headers.getStatusValue(), "200");
         EXPECT_NE(headers.GrpcStatus(), nullptr);
-        EXPECT_EQ(headers.GrpcStatus()->value().getStringView(),
+        EXPECT_EQ(headers.getGrpcStatusValue(),
                   std::to_string(enumToInt(Grpc::Status::WellKnownGrpcStatus::Unauthenticated)));
         EXPECT_NE(headers.GrpcMessage(), nullptr);
         const auto& encoded = Utility::PercentEncoding::encode(json);
-        EXPECT_EQ(headers.GrpcMessage()->value().getStringView(), encoded);
+        EXPECT_EQ(headers.getGrpcMessageValue(), encoded);
       }));
-  Utility::sendLocalReply(true, callbacks, is_reset, Http::Code::Unauthorized, json, absl::nullopt,
-                          false);
+  Utility::sendLocalReply(
+      is_reset, callbacks,
+      Utility::LocalReplyData{true, Http::Code::Unauthorized, json, absl::nullopt, false});
 }
 
 TEST(HttpUtility, RateLimitedGrpcStatus) {
@@ -507,22 +517,25 @@ TEST(HttpUtility, RateLimitedGrpcStatus) {
   EXPECT_CALL(callbacks, encodeHeaders_(_, true))
       .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
         EXPECT_NE(headers.GrpcStatus(), nullptr);
-        EXPECT_EQ(headers.GrpcStatus()->value().getStringView(),
+        EXPECT_EQ(headers.getGrpcStatusValue(),
                   std::to_string(enumToInt(Grpc::Status::WellKnownGrpcStatus::Unavailable)));
       }));
-  Utility::sendLocalReply(true, callbacks, false, Http::Code::TooManyRequests, "", absl::nullopt,
-                          false);
+  Utility::sendLocalReply(
+      false, callbacks,
+      Utility::LocalReplyData{true, Http::Code::TooManyRequests, "", absl::nullopt, false});
 
   EXPECT_CALL(callbacks, encodeHeaders_(_, true))
       .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
         EXPECT_NE(headers.GrpcStatus(), nullptr);
-        EXPECT_EQ(headers.GrpcStatus()->value().getStringView(),
+        EXPECT_EQ(headers.getGrpcStatusValue(),
                   std::to_string(enumToInt(Grpc::Status::WellKnownGrpcStatus::ResourceExhausted)));
       }));
-  Utility::sendLocalReply(true, callbacks, false, Http::Code::TooManyRequests, "",
-                          absl::make_optional<Grpc::Status::GrpcStatus>(
-                              Grpc::Status::WellKnownGrpcStatus::ResourceExhausted),
-                          false);
+  Utility::sendLocalReply(
+      false, callbacks,
+      Utility::LocalReplyData{true, Http::Code::TooManyRequests, "",
+                              absl::make_optional<Grpc::Status::GrpcStatus>(
+                                  Grpc::Status::WellKnownGrpcStatus::ResourceExhausted),
+                              false});
 }
 
 TEST(HttpUtility, SendLocalReplyDestroyedEarly) {
@@ -533,8 +546,9 @@ TEST(HttpUtility, SendLocalReplyDestroyedEarly) {
     is_reset = true;
   }));
   EXPECT_CALL(callbacks, encodeData(_, true)).Times(0);
-  Utility::sendLocalReply(false, callbacks, is_reset, Http::Code::PayloadTooLarge, "large",
-                          absl::nullopt, false);
+  Utility::sendLocalReply(
+      is_reset, callbacks,
+      Utility::LocalReplyData{false, Http::Code::PayloadTooLarge, "large", absl::nullopt, false});
 }
 
 TEST(HttpUtility, SendLocalReplyHeadRequest) {
@@ -542,11 +556,11 @@ TEST(HttpUtility, SendLocalReplyHeadRequest) {
   bool is_reset = false;
   EXPECT_CALL(callbacks, encodeHeaders_(_, true))
       .WillOnce(Invoke([&](const ResponseHeaderMap& headers, bool) -> void {
-        EXPECT_EQ(headers.ContentLength()->value().getStringView(),
-                  fmt::format("{}", strlen("large")));
+        EXPECT_EQ(headers.getContentLengthValue(), fmt::format("{}", strlen("large")));
       }));
-  Utility::sendLocalReply(false, callbacks, is_reset, Http::Code::PayloadTooLarge, "large",
-                          absl::nullopt, true);
+  Utility::sendLocalReply(
+      is_reset, callbacks,
+      Utility::LocalReplyData{false, Http::Code::PayloadTooLarge, "large", absl::nullopt, true});
 }
 
 TEST(HttpUtility, TestExtractHostPathFromUri) {
@@ -592,8 +606,8 @@ TEST(HttpUtility, TestPrepareHeaders) {
 
   Http::RequestMessagePtr message = Utility::prepareHeaders(http_uri);
 
-  EXPECT_EQ("/x/y/z", message->headers().Path()->value().getStringView());
-  EXPECT_EQ("dns.name", message->headers().Host()->value().getStringView());
+  EXPECT_EQ("/x/y/z", message->headers().getPathValue());
+  EXPECT_EQ("dns.name", message->headers().getHostValue());
 }
 
 TEST(HttpUtility, QueryParamsToString) {
@@ -813,7 +827,7 @@ TEST(HttpUtility, TestTeHeaderGzipTrailersSanitized) {
   // Expect that the set of headers is valid and can be sanitized
   EXPECT_TRUE(Utility::sanitizeConnectionHeader(request_headers));
 
-  Http::TestHeaderMapImpl sanitized_headers = {
+  Http::TestRequestHeaderMapImpl sanitized_headers = {
       {":method", "GET"},
       {":path", "/"},
       {":scheme", "http"},
@@ -841,7 +855,7 @@ TEST(HttpUtility, TestNominatedConnectionHeader) {
   };
   EXPECT_TRUE(Utility::sanitizeConnectionHeader(request_headers));
 
-  TestHeaderMapImpl sanitized_headers = {
+  TestRequestHeaderMapImpl sanitized_headers = {
       {":method", "GET"},
       {":path", "/"},
       {":scheme", "http"},
@@ -869,7 +883,7 @@ TEST(HttpUtility, TestNominatedConnectionHeader2) {
   };
   EXPECT_TRUE(Utility::sanitizeConnectionHeader(request_headers));
 
-  Http::TestHeaderMapImpl sanitized_headers = {
+  Http::TestRequestHeaderMapImpl sanitized_headers = {
       {":method", "GET"},
       {":path", "/"},
       {":scheme", "http"},
@@ -896,7 +910,7 @@ TEST(HttpUtility, TestNominatedPseudoHeader) {
   };
 
   // Headers remain unchanged since there are nominated pseudo headers
-  Http::TestHeaderMapImpl sanitized_headers(request_headers);
+  Http::TestRequestHeaderMapImpl sanitized_headers(request_headers);
 
   EXPECT_FALSE(Utility::sanitizeConnectionHeader(request_headers));
   EXPECT_EQ(sanitized_headers, request_headers);
@@ -918,7 +932,7 @@ TEST(HttpUtility, TestSanitizeEmptyTokensFromHeaders) {
   };
   EXPECT_TRUE(Utility::sanitizeConnectionHeader(request_headers));
 
-  Http::TestHeaderMapImpl sanitized_headers = {
+  Http::TestRequestHeaderMapImpl sanitized_headers = {
       {":method", "GET"},
       {":path", "/"},
       {":scheme", "http"},
@@ -945,7 +959,7 @@ TEST(HttpUtility, TestTooManyNominatedHeaders) {
   };
 
   // Headers remain unchanged because there are too many nominated headers
-  Http::TestHeaderMapImpl sanitized_headers(request_headers);
+  Http::TestRequestHeaderMapImpl sanitized_headers(request_headers);
 
   EXPECT_FALSE(Utility::sanitizeConnectionHeader(request_headers));
   EXPECT_EQ(sanitized_headers, request_headers);
@@ -963,7 +977,7 @@ TEST(HttpUtility, TestRejectNominatedXForwardedFor) {
   };
 
   // Headers remain unchanged due to nominated X-Forwarded* header
-  Http::TestHeaderMapImpl sanitized_headers(request_headers);
+  Http::TestRequestHeaderMapImpl sanitized_headers(request_headers);
 
   EXPECT_FALSE(Utility::sanitizeConnectionHeader(request_headers));
   EXPECT_EQ(sanitized_headers, request_headers);
@@ -981,7 +995,7 @@ TEST(HttpUtility, TestRejectNominatedXForwardedHost) {
   };
 
   // Headers remain unchanged due to nominated X-Forwarded* header
-  Http::TestHeaderMapImpl sanitized_headers(request_headers);
+  Http::TestRequestHeaderMapImpl sanitized_headers(request_headers);
 
   EXPECT_FALSE(Utility::sanitizeConnectionHeader(request_headers));
   EXPECT_EQ(sanitized_headers, request_headers);
@@ -1001,7 +1015,7 @@ TEST(HttpUtility, TestRejectNominatedXForwardedProto) {
   // Headers are not sanitized due to nominated X-Forwarded* header
   EXPECT_FALSE(Utility::sanitizeConnectionHeader(request_headers));
 
-  Http::TestHeaderMapImpl sanitized_headers = {
+  Http::TestRequestHeaderMapImpl sanitized_headers = {
       {":method", "GET"},
       {":path", "/"},
       {":scheme", "http"},
@@ -1025,7 +1039,7 @@ TEST(HttpUtility, TestRejectTrailersSubString) {
   };
   EXPECT_TRUE(Utility::sanitizeConnectionHeader(request_headers));
 
-  Http::TestHeaderMapImpl sanitized_headers = {
+  Http::TestRequestHeaderMapImpl sanitized_headers = {
       {":method", "GET"},
       {":path", "/"},
       {":scheme", "http"},
@@ -1063,7 +1077,7 @@ TEST(HttpUtility, TestRejectTeHeaderTooLong) {
   };
 
   // Headers remain unchanged because the TE value is too long
-  Http::TestHeaderMapImpl sanitized_headers(request_headers);
+  Http::TestRequestHeaderMapImpl sanitized_headers(request_headers);
 
   EXPECT_FALSE(Utility::sanitizeConnectionHeader(request_headers));
   EXPECT_EQ(sanitized_headers, request_headers);
@@ -1071,72 +1085,87 @@ TEST(HttpUtility, TestRejectTeHeaderTooLong) {
 
 TEST(Url, ParsingFails) {
   Utility::Url url;
-  EXPECT_FALSE(url.initialize(""));
-  EXPECT_FALSE(url.initialize("foo"));
-  EXPECT_FALSE(url.initialize("http://"));
-  EXPECT_FALSE(url.initialize("random_scheme://host.com/path"));
+  EXPECT_FALSE(url.initialize("", false));
+  EXPECT_FALSE(url.initialize("foo", false));
+  EXPECT_FALSE(url.initialize("http://", false));
+  EXPECT_FALSE(url.initialize("random_scheme://host.com/path", false));
+  EXPECT_FALSE(url.initialize("http://www.foo.com", true));
+  EXPECT_FALSE(url.initialize("foo.com", true));
 }
 
-void ValidateUrl(absl::string_view raw_url, absl::string_view expected_scheme,
+void validateUrl(absl::string_view raw_url, absl::string_view expected_scheme,
                  absl::string_view expected_host_port, absl::string_view expected_path) {
   Utility::Url url;
-  ASSERT_TRUE(url.initialize(raw_url)) << "Failed to initialize " << raw_url;
+  ASSERT_TRUE(url.initialize(raw_url, false)) << "Failed to initialize " << raw_url;
   EXPECT_EQ(url.scheme(), expected_scheme);
-  EXPECT_EQ(url.host_and_port(), expected_host_port);
-  EXPECT_EQ(url.path_and_query_params(), expected_path);
+  EXPECT_EQ(url.hostAndPort(), expected_host_port);
+  EXPECT_EQ(url.pathAndQueryParams(), expected_path);
+}
+
+void validateConnectUrl(absl::string_view raw_url, absl::string_view expected_host_port) {
+  Utility::Url url;
+  ASSERT_TRUE(url.initialize(raw_url, true)) << "Failed to initialize " << raw_url;
+  EXPECT_TRUE(url.scheme().empty());
+  EXPECT_TRUE(url.pathAndQueryParams().empty());
+  EXPECT_EQ(url.hostAndPort(), expected_host_port);
 }
 
 TEST(Url, ParsingTest) {
   // Test url with no explicit path (with and without port)
-  ValidateUrl("http://www.host.com", "http", "www.host.com", "/");
-  ValidateUrl("http://www.host.com:80", "http", "www.host.com:80", "/");
+  validateUrl("http://www.host.com", "http", "www.host.com", "/");
+  validateUrl("http://www.host.com:80", "http", "www.host.com:80", "/");
 
   // Test url with "/" path.
-  ValidateUrl("http://www.host.com:80/", "http", "www.host.com:80", "/");
-  ValidateUrl("http://www.host.com/", "http", "www.host.com", "/");
+  validateUrl("http://www.host.com:80/", "http", "www.host.com:80", "/");
+  validateUrl("http://www.host.com/", "http", "www.host.com", "/");
 
   // Test url with "?".
-  ValidateUrl("http://www.host.com:80/?", "http", "www.host.com:80", "/?");
-  ValidateUrl("http://www.host.com/?", "http", "www.host.com", "/?");
+  validateUrl("http://www.host.com:80/?", "http", "www.host.com:80", "/?");
+  validateUrl("http://www.host.com/?", "http", "www.host.com", "/?");
 
   // Test url with "?" but without slash.
-  ValidateUrl("http://www.host.com:80?", "http", "www.host.com:80", "?");
-  ValidateUrl("http://www.host.com?", "http", "www.host.com", "?");
+  validateUrl("http://www.host.com:80?", "http", "www.host.com:80", "?");
+  validateUrl("http://www.host.com?", "http", "www.host.com", "?");
 
   // Test url with multi-character path
-  ValidateUrl("http://www.host.com:80/path", "http", "www.host.com:80", "/path");
-  ValidateUrl("http://www.host.com/path", "http", "www.host.com", "/path");
+  validateUrl("http://www.host.com:80/path", "http", "www.host.com:80", "/path");
+  validateUrl("http://www.host.com/path", "http", "www.host.com", "/path");
 
   // Test url with multi-character path and ? at the end
-  ValidateUrl("http://www.host.com:80/path?", "http", "www.host.com:80", "/path?");
-  ValidateUrl("http://www.host.com/path?", "http", "www.host.com", "/path?");
+  validateUrl("http://www.host.com:80/path?", "http", "www.host.com:80", "/path?");
+  validateUrl("http://www.host.com/path?", "http", "www.host.com", "/path?");
 
   // Test https scheme
-  ValidateUrl("https://www.host.com", "https", "www.host.com", "/");
+  validateUrl("https://www.host.com", "https", "www.host.com", "/");
 
   // Test url with query parameter
-  ValidateUrl("http://www.host.com:80/?query=param", "http", "www.host.com:80", "/?query=param");
-  ValidateUrl("http://www.host.com/?query=param", "http", "www.host.com", "/?query=param");
+  validateUrl("http://www.host.com:80/?query=param", "http", "www.host.com:80", "/?query=param");
+  validateUrl("http://www.host.com/?query=param", "http", "www.host.com", "/?query=param");
 
   // Test url with query parameter but without slash
-  ValidateUrl("http://www.host.com:80?query=param", "http", "www.host.com:80", "?query=param");
-  ValidateUrl("http://www.host.com?query=param", "http", "www.host.com", "?query=param");
+  validateUrl("http://www.host.com:80?query=param", "http", "www.host.com:80", "?query=param");
+  validateUrl("http://www.host.com?query=param", "http", "www.host.com", "?query=param");
 
   // Test url with multi-character path and query parameter
-  ValidateUrl("http://www.host.com:80/path?query=param", "http", "www.host.com:80",
+  validateUrl("http://www.host.com:80/path?query=param", "http", "www.host.com:80",
               "/path?query=param");
-  ValidateUrl("http://www.host.com/path?query=param", "http", "www.host.com", "/path?query=param");
+  validateUrl("http://www.host.com/path?query=param", "http", "www.host.com", "/path?query=param");
 
   // Test url with multi-character path and more than one query parameter
-  ValidateUrl("http://www.host.com:80/path?query=param&query2=param2", "http", "www.host.com:80",
+  validateUrl("http://www.host.com:80/path?query=param&query2=param2", "http", "www.host.com:80",
               "/path?query=param&query2=param2");
-  ValidateUrl("http://www.host.com/path?query=param&query2=param2", "http", "www.host.com",
+  validateUrl("http://www.host.com/path?query=param&query2=param2", "http", "www.host.com",
               "/path?query=param&query2=param2");
   // Test url with multi-character path, more than one query parameter and fragment
-  ValidateUrl("http://www.host.com:80/path?query=param&query2=param2#fragment", "http",
+  validateUrl("http://www.host.com:80/path?query=param&query2=param2#fragment", "http",
               "www.host.com:80", "/path?query=param&query2=param2#fragment");
-  ValidateUrl("http://www.host.com/path?query=param&query2=param2#fragment", "http", "www.host.com",
+  validateUrl("http://www.host.com/path?query=param&query2=param2#fragment", "http", "www.host.com",
               "/path?query=param&query2=param2#fragment");
+}
+
+TEST(Url, ParsingForConnectTest) {
+  validateConnectUrl("host.com:443", "host.com:443");
+  validateConnectUrl("host.com:80", "host.com:80");
 }
 
 void validatePercentEncodingEncodeDecode(absl::string_view source,

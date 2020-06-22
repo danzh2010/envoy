@@ -4,7 +4,7 @@
 
 #include "common/router/config_impl.h"
 
-#include "test/common/router/route_fuzz.pb.h"
+#include "test/common/router/route_fuzz.pb.validate.h"
 #include "test/fuzz/fuzz_runner.h"
 #include "test/fuzz/utility.h"
 #include "test/mocks/server/mocks.h"
@@ -22,12 +22,7 @@ cleanRouteConfig(envoy::config::route::v3::RouteConfiguration route_config) {
                 [](envoy::config::route::v3::VirtualHost& virtual_host) {
                   auto routes = virtual_host.mutable_routes();
                   for (int i = 0; i < routes->size();) {
-                    // Erase routes that use a regex matcher. This is deprecated and may cause
-                    // crashes when wildcards are matched against very long headers. See
-                    // https://github.com/envoyproxy/envoy/issues/7728.
-                    if (routes->Get(i).match().path_specifier_case() ==
-                        envoy::config::route::v3::RouteMatch::PathSpecifierCase::
-                            kHiddenEnvoyDeprecatedRegex) {
+                    if (routes->Get(i).has_filter_action()) {
                       routes->erase(routes->begin() + i);
                     } else {
                       ++i;
@@ -43,7 +38,7 @@ DEFINE_PROTO_FUZZER(const test::common::router::RouteTestCase& input) {
   static NiceMock<Envoy::StreamInfo::MockStreamInfo> stream_info;
   static NiceMock<Server::Configuration::MockServerFactoryContext> factory_context;
   try {
-    TestUtility::validate(input.config());
+    TestUtility::validate(input);
     ConfigImpl config(cleanRouteConfig(input.config()), factory_context,
                       ProtobufMessage::getNullValidationVisitor(), true);
     auto headers = Fuzz::fromHeaders<Http::TestRequestHeaderMapImpl>(input.headers());

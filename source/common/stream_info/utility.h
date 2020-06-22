@@ -40,6 +40,8 @@ private:
   const static std::string STREAM_IDLE_TIMEOUT;
   const static std::string INVALID_ENVOY_REQUEST_HEADERS;
   const static std::string DOWNSTREAM_PROTOCOL_ERROR;
+  const static std::string UPSTREAM_MAX_STREAM_DURATION_REACHED;
+  const static std::string RESPONSE_FROM_CACHE_FILTER;
 };
 
 /**
@@ -53,6 +55,13 @@ public:
    */
   static const std::string&
   formatDownstreamAddressNoPort(const Network::Address::Instance& address);
+
+  /**
+   * @param address supplies the downstream address.
+   * @return a port, extracted from the provided downstream address for logs, header expansion, etc.
+   */
+  static const std::string
+  formatDownstreamAddressJustPort(const Network::Address::Instance& address);
 };
 
 } // namespace StreamInfo

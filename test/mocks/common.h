@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "envoy/common/conn_pool.h"
 #include "envoy/common/scope_tracker.h"
 #include "envoy/common/time.h"
 #include "envoy/common/token_bucket.h"
@@ -53,7 +54,10 @@ public:
   Event::SchedulerPtr createScheduler(Event::Scheduler& base_scheduler) override {
     return real_time_.createScheduler(base_scheduler);
   }
-  void sleep(const Duration& duration) override { real_time_.sleep(duration); }
+  void advanceTimeWait(const Duration& duration) override { real_time_.advanceTimeWait(duration); }
+  void advanceTimeAsync(const Duration& duration) override {
+    real_time_.advanceTimeAsync(duration);
+  }
   Thread::CondVar::WaitStatus
   waitFor(Thread::MutexBasicLockable& mutex, Thread::CondVar& condvar,
           const Duration& duration) noexcept ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex) override {
@@ -91,5 +95,17 @@ class MockScopedTrackedObject : public ScopeTrackedObject {
 public:
   MOCK_METHOD(void, dumpState, (std::ostream&, int), (const));
 };
+
+namespace ConnectionPool {
+
+class MockCancellable : public Cancellable {
+public:
+  MockCancellable();
+  ~MockCancellable() override;
+
+  // ConnectionPool::Cancellable
+  MOCK_METHOD(void, cancel, (CancelPolicy cancel_policy));
+};
+} // namespace ConnectionPool
 
 } // namespace Envoy

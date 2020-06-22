@@ -19,11 +19,12 @@
 #include "common/http/context_impl.h"
 #include "common/http/date_provider_impl.h"
 #include "common/http/exception.h"
+#include "common/http/request_id_extension_impl.h"
 #include "common/network/address_impl.h"
 #include "common/network/utility.h"
 #include "common/stats/symbol_table_creator.h"
 
-#include "test/common/http/conn_manager_impl_fuzz.pb.h"
+#include "test/common/http/conn_manager_impl_fuzz.pb.validate.h"
 #include "test/fuzz/fuzz_runner.h"
 #include "test/fuzz/utility.h"
 #include "test/mocks/access_log/mocks.h"
@@ -61,21 +62,26 @@ public:
     std::shared_ptr<Router::MockConfig> route_config_{new NiceMock<Router::MockConfig>()};
   };
 
-  FuzzConfig()
-      : stats_{{ALL_HTTP_CONN_MAN_STATS(POOL_COUNTER(fake_stats_), POOL_GAUGE(fake_stats_),
+  FuzzConfig(envoy::extensions::filters::network::http_connection_manager::v3::
+                 HttpConnectionManager::ForwardClientCertDetails forward_client_cert)
+      : stats_({ALL_HTTP_CONN_MAN_STATS(POOL_COUNTER(fake_stats_), POOL_GAUGE(fake_stats_),
                                         POOL_HISTOGRAM(fake_stats_))},
-               "",
-               fake_stats_},
+               "", fake_stats_),
         tracing_stats_{CONN_MAN_TRACING_STATS(POOL_COUNTER(fake_stats_))},
-        listener_stats_{CONN_MAN_LISTENER_STATS(POOL_COUNTER(fake_stats_))} {
+        listener_stats_{CONN_MAN_LISTENER_STATS(POOL_COUNTER(fake_stats_))},
+        local_reply_(LocalReply::Factory::createDefault()) {
     ON_CALL(route_config_provider_, lastUpdated()).WillByDefault(Return(time_system_.systemTime()));
     ON_CALL(scoped_route_config_provider_, lastUpdated())
         .WillByDefault(Return(time_system_.systemTime()));
     access_logs_.emplace_back(std::make_shared<NiceMock<AccessLog::MockInstance>>());
+    request_id_extension_ = RequestIDExtensionFactory::defaultInstance(random_);
+    forward_client_cert_ = fromClientCert(forward_client_cert);
   }
 
   void newStream() {
-    codec_ = new NiceMock<MockServerConnection>();
+    if (!codec_) {
+      codec_ = new NiceMock<MockServerConnection>();
+    }
     decoder_filter_ = new NiceMock<MockStreamDecoderFilter>();
     encoder_filter_ = new NiceMock<MockStreamEncoderFilter>();
     EXPECT_CALL(filter_factory_, createFilterChain(_))
@@ -85,9 +91,41 @@ public:
         }));
     EXPECT_CALL(*decoder_filter_, setDecoderFilterCallbacks(_));
     EXPECT_CALL(*encoder_filter_, setEncoderFilterCallbacks(_));
+    EXPECT_CALL(filter_factory_, createUpgradeFilterChain("WebSocket", _, _))
+        .WillRepeatedly(Invoke([&](absl::string_view, const Http::FilterChainFactory::UpgradeMap*,
+                                   FilterChainFactoryCallbacks& callbacks) -> bool {
+          filter_factory_.createFilterChain(callbacks);
+          return true;
+        }));
+  }
+
+  Http::ForwardClientCertType
+  fromClientCert(envoy::extensions::filters::network::http_connection_manager::v3::
+                     HttpConnectionManager::ForwardClientCertDetails forward_client_cert) {
+    switch (forward_client_cert) {
+    case envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager::
+        SANITIZE:
+      return Http::ForwardClientCertType::Sanitize;
+    case envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager::
+        FORWARD_ONLY:
+      return Http::ForwardClientCertType::ForwardOnly;
+    case envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager::
+        APPEND_FORWARD:
+      return Http::ForwardClientCertType::AppendForward;
+    case envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager::
+        SANITIZE_SET:
+      return Http::ForwardClientCertType::SanitizeSet;
+    case envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager::
+        ALWAYS_FORWARD_ONLY:
+      return Http::ForwardClientCertType::AlwaysForwardOnly;
+    default:
+      return Http::ForwardClientCertType::Sanitize;
+    }
   }
 
   // Http::ConnectionManagerConfig
+
+  RequestIDExtensionSharedPtr requestIDExtension() override { return request_id_extension_; }
   const std::list<AccessLog::InstanceSharedPtr>& accessLogs() override { return access_logs_; }
   ServerConnectionPtr createCodec(Network::Connection&, const Buffer::Instance&,
                                   ServerConnectionCallbacks&) override {
@@ -98,12 +136,16 @@ public:
   FilterChainFactory& filterFactory() override { return filter_factory_; }
   bool generateRequestId() const override { return true; }
   bool preserveExternalRequestId() const override { return false; }
+  bool alwaysSetRequestIdInResponse() const override { return false; }
   uint32_t maxRequestHeadersKb() const override { return max_request_headers_kb_; }
   uint32_t maxRequestHeadersCount() const override { return max_request_headers_count_; }
   absl::optional<std::chrono::milliseconds> idleTimeout() const override { return idle_timeout_; }
   bool isRoutable() const override { return true; }
   absl::optional<std::chrono::milliseconds> maxConnectionDuration() const override {
     return max_connection_duration_;
+  }
+  absl::optional<std::chrono::milliseconds> maxStreamDuration() const override {
+    return max_stream_duration_;
   }
   std::chrono::milliseconds streamIdleTimeout() const override { return stream_idle_timeout_; }
   std::chrono::milliseconds requestTimeout() const override { return request_timeout_; }
@@ -140,15 +182,24 @@ public:
   }
   const Network::Address::Instance& localAddress() override { return local_address_; }
   const absl::optional<std::string>& userAgent() override { return user_agent_; }
+  Tracing::HttpTracerSharedPtr tracer() override { return http_tracer_; }
   const TracingConnectionManagerConfig* tracingConfig() override { return tracing_config_.get(); }
   ConnectionManagerListenerStats& listenerStats() override { return listener_stats_; }
   bool proxy100Continue() const override { return proxy_100_continue_; }
   const Http::Http1Settings& http1Settings() const override { return http1_settings_; }
   bool shouldNormalizePath() const override { return false; }
   bool shouldMergeSlashes() const override { return false; }
+  bool shouldStripMatchingPort() const override { return false; }
+  envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+  headersWithUnderscoresAction() const override {
+    return envoy::config::core::v3::HttpProtocolOptions::ALLOW;
+  }
+  const LocalReply::LocalReply& localReply() const override { return *local_reply_; }
 
   const envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager
       config_;
+  NiceMock<Runtime::MockRandomGenerator> random_;
+  RequestIDExtensionSharedPtr request_id_extension_;
   std::list<AccessLog::InstanceSharedPtr> access_logs_;
   MockServerConnection* codec_{};
   MockStreamDecoderFilter* decoder_filter_{};
@@ -170,20 +221,23 @@ public:
   uint32_t max_request_headers_count_{Http::DEFAULT_MAX_HEADERS_COUNT};
   absl::optional<std::chrono::milliseconds> idle_timeout_;
   absl::optional<std::chrono::milliseconds> max_connection_duration_;
+  absl::optional<std::chrono::milliseconds> max_stream_duration_;
   std::chrono::milliseconds stream_idle_timeout_{};
   std::chrono::milliseconds request_timeout_{};
   std::chrono::milliseconds delayed_close_timeout_{};
   bool use_remote_address_{true};
-  Http::ForwardClientCertType forward_client_cert_{Http::ForwardClientCertType::Sanitize};
+  Http::ForwardClientCertType forward_client_cert_;
   std::vector<Http::ClientCertDetailsType> set_current_client_cert_details_;
   Network::Address::Ipv4Instance local_address_{"127.0.0.1"};
   absl::optional<std::string> user_agent_;
+  Tracing::HttpTracerSharedPtr http_tracer_{std::make_shared<NiceMock<Tracing::MockHttpTracer>>()};
   TracingConnectionManagerConfigPtr tracing_config_;
   bool proxy_100_continue_{true};
   bool preserve_external_request_id_{false};
   Http::Http1Settings http1_settings_;
   Http::DefaultInternalAddressConfig internal_address_config_;
   bool normalize_path_{true};
+  LocalReply::LocalReplyPtr local_reply_;
 };
 
 // Internal representation of stream state. Encapsulates the stream state, mocks
@@ -199,9 +253,14 @@ public:
   enum class StreamState { PendingHeaders, PendingDataOrTrailers, Closed };
 
   FuzzStream(ConnectionManagerImpl& conn_manager, FuzzConfig& config,
-             const HeaderMap& request_headers, bool end_stream)
+             const HeaderMap& request_headers,
+             test::common::http::HeaderStatus decode_header_status, bool end_stream)
       : conn_manager_(conn_manager), config_(config) {
     config_.newStream();
+    request_state_ = end_stream ? StreamState::Closed : StreamState::PendingDataOrTrailers;
+    response_state_ = StreamState::PendingHeaders;
+    decoder_filter_ = config.decoder_filter_;
+    encoder_filter_ = config.encoder_filter_;
     EXPECT_CALL(*config_.codec_, dispatch(_))
         .WillOnce(InvokeWithoutArgs([this, &request_headers, end_stream] {
           decoder_ = &conn_manager_.newStream(encoder_);
@@ -210,19 +269,28 @@ public:
             headers->setReferenceKey(Headers::get().Method, "GET");
           }
           if (headers->Host() != nullptr &&
-              !HeaderUtility::authorityIsValid(headers->Host()->value().getStringView())) {
+              !HeaderUtility::authorityIsValid(headers->getHostValue())) {
             // Sanitize host header so we don't fail at ASSERTs that verify header sanity checks
             // which should have been performed by the codec.
-            headers->setHost(
-                Fuzz::replaceInvalidHostCharacters(headers->Host()->value().getStringView()));
+            headers->setHost(Fuzz::replaceInvalidHostCharacters(headers->getHostValue()));
           }
+          // If sendLocalReply is called:
+          ON_CALL(encoder_, encodeHeaders(_, true))
+              .WillByDefault(Invoke([this](const ResponseHeaderMap&, bool end_stream) -> void {
+                response_state_ =
+                    end_stream ? StreamState::Closed : StreamState::PendingDataOrTrailers;
+              }));
           decoder_->decodeHeaders(std::move(headers), end_stream);
+          return Http::okStatus();
         }));
+    ON_CALL(*decoder_filter_, decodeHeaders(_, _))
+        .WillByDefault(
+            InvokeWithoutArgs([this, decode_header_status]() -> Http::FilterHeadersStatus {
+              header_status_ = fromHeaderStatus(decode_header_status);
+              return *header_status_;
+            }));
     fakeOnData();
-    decoder_filter_ = config.decoder_filter_;
-    encoder_filter_ = config.encoder_filter_;
-    request_state_ = end_stream ? StreamState::Closed : StreamState::PendingDataOrTrailers;
-    response_state_ = StreamState::PendingHeaders;
+    FUZZ_ASSERT(testing::Mock::VerifyAndClearExpectations(config_.codec_));
   }
 
   void fakeOnData() {
@@ -236,6 +304,12 @@ public:
       return Http::FilterHeadersStatus::Continue;
     case test::common::http::HeaderStatus::HEADER_STOP_ITERATION:
       return Http::FilterHeadersStatus::StopIteration;
+    case test::common::http::HeaderStatus::HEADER_CONTINUE_AND_END_STREAM:
+      return Http::FilterHeadersStatus::ContinueAndEndStream;
+    case test::common::http::HeaderStatus::HEADER_STOP_ALL_ITERATION_AND_BUFFER:
+      return Http::FilterHeadersStatus::StopAllIterationAndBuffer;
+    case test::common::http::HeaderStatus::HEADER_STOP_ALL_ITERATION_AND_WATERMARK:
+      return Http::FilterHeadersStatus::StopAllIterationAndWatermark;
     default:
       return Http::FilterHeadersStatus::Continue;
     }
@@ -295,13 +369,16 @@ public:
               if (data_action.has_decoder_filter_callback_action()) {
                 decoderFilterCallbackAction(data_action.decoder_filter_callback_action());
               }
-              return fromDataStatus(data_action.status());
+              data_status_ = fromDataStatus(data_action.status());
+              return *data_status_;
             }));
         EXPECT_CALL(*config_.codec_, dispatch(_)).WillOnce(InvokeWithoutArgs([this, &data_action] {
           Buffer::OwnedImpl buf(std::string(data_action.size() % (1024 * 1024), 'a'));
           decoder_->decodeData(buf, data_action.end_stream());
+          return Http::okStatus();
         }));
         fakeOnData();
+        FUZZ_ASSERT(testing::Mock::VerifyAndClearExpectations(config_.codec_));
         state = data_action.end_stream() ? StreamState::Closed : StreamState::PendingDataOrTrailers;
       }
       break;
@@ -321,22 +398,33 @@ public:
             .WillOnce(InvokeWithoutArgs([this, &trailers_action] {
               decoder_->decodeTrailers(std::make_unique<TestRequestTrailerMapImpl>(
                   Fuzz::fromHeaders<TestRequestTrailerMapImpl>(trailers_action.headers())));
+              return Http::okStatus();
             }));
         fakeOnData();
+        FUZZ_ASSERT(testing::Mock::VerifyAndClearExpectations(config_.codec_));
         state = StreamState::Closed;
       }
       break;
     }
     case test::common::http::RequestAction::kContinueDecoding: {
-      decoder_filter_->callbacks_->continueDecoding();
+      if (header_status_ == FilterHeadersStatus::StopAllIterationAndBuffer ||
+          header_status_ == FilterHeadersStatus::StopAllIterationAndWatermark ||
+          (header_status_ == FilterHeadersStatus::StopIteration &&
+           (data_status_ == FilterDataStatus::StopIterationAndBuffer ||
+            data_status_ == FilterDataStatus::StopIterationAndWatermark ||
+            data_status_ == FilterDataStatus::StopIterationNoBuffer))) {
+        decoder_filter_->callbacks_->continueDecoding();
+      }
       break;
     }
-    case test::common::http::RequestAction::kThrowDecoderException: {
+    case test::common::http::RequestAction::kThrowDecoderException:
+    // Dispatch no longer throws, execute subsequent kReturnDecoderError case.
+    case test::common::http::RequestAction::kReturnDecoderError: {
       if (state == StreamState::PendingDataOrTrailers) {
-        EXPECT_CALL(*config_.codec_, dispatch(_)).WillOnce(InvokeWithoutArgs([] {
-          throw CodecProtocolException("blah");
-        }));
+        EXPECT_CALL(*config_.codec_, dispatch(_))
+            .WillOnce(testing::Return(codecProtocolError("blah")));
         fakeOnData();
+        FUZZ_ASSERT(testing::Mock::VerifyAndClearExpectations(config_.codec_));
         state = StreamState::Closed;
       }
       break;
@@ -422,12 +510,24 @@ public:
   MockStreamEncoderFilter* encoder_filter_{};
   StreamState request_state_;
   StreamState response_state_;
+  absl::optional<Http::FilterHeadersStatus> header_status_;
+  absl::optional<Http::FilterDataStatus> data_status_;
 };
 
 using FuzzStreamPtr = std::unique_ptr<FuzzStream>;
 
 DEFINE_PROTO_FUZZER(const test::common::http::ConnManagerImplTestCase& input) {
-  FuzzConfig config;
+  try {
+    TestUtility::validate(input);
+  } catch (const ProtoValidationException& e) {
+    ENVOY_LOG_MISC(debug, "ProtoValidationException: {}", e.what());
+    return;
+  } catch (const Envoy::ProtobufMessage::DeprecatedProtoFieldException& e) {
+    ENVOY_LOG_MISC(debug, "DeprecatedProtoFieldException: {}", e.what());
+    return;
+  }
+
+  FuzzConfig config(input.forward_client_cert());
   NiceMock<Network::MockDrainDecision> drain_close;
   NiceMock<Runtime::MockRandomGenerator> random;
   Stats::SymbolTablePtr symbol_table(Stats::SymbolTableCreator::makeSymbolTable());
@@ -465,8 +565,9 @@ DEFINE_PROTO_FUZZER(const test::common::http::ConnManagerImplTestCase& input) {
     case test::common::http::Action::kNewStream: {
       streams.emplace_back(new FuzzStream(
           conn_manager, config,
-          Fuzz::fromHeaders<TestRequestHeaderMapImpl>(action.new_stream().request_headers()),
-          action.new_stream().end_stream()));
+          Fuzz::fromHeaders<TestRequestHeaderMapImpl>(action.new_stream().request_headers(),
+                                                      /* ignore_headers =*/{}, {":authority"}),
+          action.new_stream().status(), action.new_stream().end_stream()));
       break;
     }
     case test::common::http::Action::kStreamAction: {

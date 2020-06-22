@@ -8,7 +8,6 @@
 #include "envoy/service/secret/v3/sds.pb.h"
 
 #include "common/config/api_version.h"
-#include "common/config/resources.h"
 #include "common/event/dispatcher_impl.h"
 #include "common/network/connection_impl.h"
 #include "common/network/utility.h"
@@ -25,6 +24,7 @@
 #include "test/mocks/secret/mocks.h"
 #include "test/mocks/server/mocks.h"
 #include "test/test_common/network_utility.h"
+#include "test/test_common/resources.h"
 #include "test/test_common/test_time_system.h"
 #include "test/test_common/utility.h"
 
@@ -183,10 +183,7 @@ public:
 
   void TearDown() override {
     cleanUpXdsConnection();
-
     client_ssl_ctx_.reset();
-    cleanupUpstreamAndDownstream();
-    codec_client_.reset();
   }
 
   Network::ClientConnectionPtr makeSslClientConnection() {
@@ -346,9 +343,6 @@ public:
     client_ssl_ctx_.reset();
     cleanupUpstreamAndDownstream();
     codec_client_.reset();
-
-    test_server_.reset();
-    fake_upstreams_.clear();
   }
 
   void enableCombinedValidationContext(bool enable) { use_combined_validation_context_ = enable; }
@@ -529,7 +523,7 @@ TEST_P(SdsDynamicUpstreamIntegrationTest, WrongSecretFirst) {
   BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
       lookupPort("http"), "GET", "/test/long/url", "", downstream_protocol_, version_);
   ASSERT_TRUE(response->complete());
-  EXPECT_EQ("503", response->headers().Status()->value().getStringView());
+  EXPECT_EQ("503", response->headers().getStatusValue());
 
   // To flush out the reset connection from the first request in upstream.
   FakeRawConnectionPtr fake_upstream_connection;

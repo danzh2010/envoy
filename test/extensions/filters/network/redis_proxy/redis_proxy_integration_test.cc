@@ -7,8 +7,6 @@
 
 #include "gtest/gtest.h"
 
-using testing::Return;
-
 namespace RedisCmdSplitter = Envoy::Extensions::NetworkFilters::RedisProxy::CommandSplitter;
 
 namespace Envoy {
@@ -295,11 +293,6 @@ public:
   RedisProxyIntegrationTest(const std::string& config = CONFIG, int num_upstreams = 2)
       : BaseIntegrationTest(GetParam(), config), num_upstreams_(num_upstreams),
         version_(GetParam()) {}
-
-  ~RedisProxyIntegrationTest() override {
-    test_server_.reset();
-    fake_upstreams_.clear();
-  }
 
   // This method encodes a fake upstream's IP address and TCP port in the
   // same format as one would expect from a Redis server in

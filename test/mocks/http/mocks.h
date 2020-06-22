@@ -75,7 +75,7 @@ public:
   ~MockServerConnection() override;
 
   // Http::Connection
-  MOCK_METHOD(void, dispatch, (Buffer::Instance & data));
+  MOCK_METHOD(Status, dispatch, (Buffer::Instance & data));
   MOCK_METHOD(void, goAway, ());
   MOCK_METHOD(Protocol, protocol, ());
   MOCK_METHOD(void, shutdownNotice, ());
@@ -92,7 +92,7 @@ public:
   ~MockClientConnection() override;
 
   // Http::Connection
-  MOCK_METHOD(void, dispatch, (Buffer::Instance & data));
+  MOCK_METHOD(Status, dispatch, (Buffer::Instance & data));
   MOCK_METHOD(void, goAway, ());
   MOCK_METHOD(Protocol, protocol, ());
   MOCK_METHOD(void, shutdownNotice, ());
@@ -136,6 +136,7 @@ public:
   MOCK_METHOD(void, resetStream, ());
   MOCK_METHOD(Upstream::ClusterInfoConstSharedPtr, clusterInfo, ());
   MOCK_METHOD(Router::RouteConstSharedPtr, route, ());
+  MOCK_METHOD(Router::RouteConstSharedPtr, route, (const Router::RouteCallback&));
   MOCK_METHOD(void, requestRouteConfigUpdate, (Http::RouteConfigUpdatedCallbackSharedPtr));
   MOCK_METHOD(absl::optional<Router::ConfigConstSharedPtr>, routeConfig, ());
   MOCK_METHOD(void, clearRouteCache, ());
@@ -214,6 +215,7 @@ public:
   MOCK_METHOD(void, requestRouteConfigUpdate, (std::function<void()>));
   MOCK_METHOD(bool, canRequestRouteConfigUpdate, ());
   MOCK_METHOD(Router::RouteConstSharedPtr, route, ());
+  MOCK_METHOD(Router::RouteConstSharedPtr, route, (const Router::RouteCallback&));
   MOCK_METHOD(void, clearRouteCache, ());
   MOCK_METHOD(uint64_t, streamId, (), (const));
   MOCK_METHOD(StreamInfo::StreamInfo&, streamInfo, ());
@@ -233,6 +235,7 @@ public:
   MOCK_METHOD(void, continueEncoding, ());
   MOCK_METHOD(const Buffer::Instance*, encodingBuffer, ());
   MOCK_METHOD(void, modifyEncodingBuffer, (std::function<void(Buffer::Instance&)>));
+  MOCK_METHOD(Http1StreamEncoderOptionsOptRef, http1StreamEncoderOptions, ());
 
   Buffer::InstancePtr buffer_;
   testing::NiceMock<Tracing::MockSpan> active_span_;
@@ -334,11 +337,15 @@ public:
   MockAsyncClientCallbacks();
   ~MockAsyncClientCallbacks() override;
 
-  void onSuccess(ResponseMessagePtr&& response) override { onSuccess_(response.get()); }
+  void onSuccess(const Http::AsyncClient::Request& request,
+                 ResponseMessagePtr&& response) override {
+    onSuccess_(request, response.get());
+  }
 
   // Http::AsyncClient::Callbacks
-  MOCK_METHOD(void, onSuccess_, (ResponseMessage * response));
-  MOCK_METHOD(void, onFailure, (Http::AsyncClient::FailureReason reason));
+  MOCK_METHOD(void, onSuccess_, (const Http::AsyncClient::Request&, ResponseMessage*));
+  MOCK_METHOD(void, onFailure,
+              (const Http::AsyncClient::Request&, Http::AsyncClient::FailureReason));
 };
 
 class MockAsyncClientStreamCallbacks : public AsyncClient::StreamCallbacks {
@@ -377,6 +384,7 @@ public:
   MOCK_METHOD(void, sendData, (Buffer::Instance & data, bool end_stream));
   MOCK_METHOD(void, sendTrailers, (RequestTrailerMap & trailers));
   MOCK_METHOD(void, reset, ());
+  MOCK_METHOD(bool, isAboveWriteBufferHighWatermark, (), (const));
 };
 
 class MockFilterChainFactoryCallbacks : public Http::FilterChainFactoryCallbacks {
@@ -522,7 +530,7 @@ public:
     *os << "is a subset of headers:\n" << expected_headers_;
   }
 
-  const TestHeaderMapImpl expected_headers_;
+  const TestRequestHeaderMapImpl expected_headers_;
 };
 
 class IsSubsetOfHeadersMatcher {
@@ -541,7 +549,7 @@ public:
   }
 
 private:
-  TestHeaderMapImpl expected_headers_;
+  TestRequestHeaderMapImpl expected_headers_;
 };
 
 IsSubsetOfHeadersMatcher IsSubsetOfHeaders(const HeaderMap& expected_headers);
@@ -578,7 +586,7 @@ public:
     *os << "is a superset of headers:\n" << expected_headers_;
   }
 
-  const TestHeaderMapImpl expected_headers_;
+  const TestRequestHeaderMapImpl expected_headers_;
 };
 
 class IsSupersetOfHeadersMatcher {
@@ -597,7 +605,7 @@ public:
   }
 
 private:
-  TestHeaderMapImpl expected_headers_;
+  TestRequestHeaderMapImpl expected_headers_;
 };
 
 IsSupersetOfHeadersMatcher IsSupersetOfHeaders(const HeaderMap& expected_headers);

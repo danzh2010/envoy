@@ -3,6 +3,7 @@
 import argparse
 import glob
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -10,22 +11,36 @@ from pathlib import Path
 
 
 def runBazelBuildForCompilationDatabase(bazel_options, bazel_targets):
-  query = 'attr(include_prefix, ".+", kind(cc_library, deps({})))'.format(
-      ' union '.join(bazel_targets))
-  build_targets = subprocess.check_output(["bazel", "query", query]).decode().splitlines()
+  query_targets = ' union '.join(bazel_targets)
+  query = ' union '.join(
+      q.format(query_targets) for q in [
+          'attr(include_prefix, ".+", kind(cc_library, deps({})))',
+          'attr(strip_include_prefix, ".+", kind(cc_library, deps({})))',
+          'attr(generator_function, ".*proto_library", kind(cc_.*, deps({})))',
+      ])
+  build_targets = subprocess.check_output(["bazel", "query", "--notool_deps",
+                                           query]).decode().splitlines()
   subprocess.check_call(["bazel", "build"] + bazel_options + build_targets)
 
 
 # This method is equivalent to https://github.com/grailbio/bazel-compilation-database/blob/master/generate.sh
 def generateCompilationDatabase(args):
-  # We need to download all remote outputs for generated source code, we don't care about built
-  # binaries so just always strip and use dynamic link to minimize download size.
+  # We need to download all remote outputs for generated source code. This option lives here to override those
+  # specified in bazelrc.
   bazel_options = shlex.split(os.environ.get("BAZEL_BUILD_OPTIONS", "")) + [
-      "-c", "fastbuild", "--build_tag_filters=-manual",
-      "--experimental_remote_download_outputs=all", "--strip=always"
+      "--config=compdb",
+      "--remote_download_outputs=all",
   ]
+  if args.keep_going:
+    bazel_options.append("-k")
   if args.run_bazel_build:
-    runBazelBuildForCompilationDatabase(bazel_options, args.bazel_targets)
+    try:
+      runBazelBuildForCompilationDatabase(bazel_options, args.bazel_targets)
+    except subprocess.CalledProcessError as e:
+      if not args.keep_going:
+        raise
+      else:
+        logging.warning("bazel build failed {}: {}".format(e.returncode, e.cmd))
 
   subprocess.check_call(["bazel", "build"] + bazel_options + [
       "--aspects=@bazel_compdb//:aspects.bzl%compilation_database_aspect",
@@ -96,6 +111,7 @@ def fixCompilationDatabase(args, db):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Generate JSON compilation database')
   parser.add_argument('--run_bazel_build', action='store_true')
+  parser.add_argument('-k', '--keep_going', action='store_true')
   parser.add_argument('--include_external', action='store_true')
   parser.add_argument('--include_genfiles', action='store_true')
   parser.add_argument('--include_headers', action='store_true')

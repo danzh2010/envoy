@@ -31,18 +31,17 @@ const uint32_t RetryPolicy::RETRY_ON_GRPC_DEADLINE_EXCEEDED;
 const uint32_t RetryPolicy::RETRY_ON_GRPC_RESOURCE_EXHAUSTED;
 const uint32_t RetryPolicy::RETRY_ON_GRPC_UNAVAILABLE;
 
-RetryStatePtr RetryStateImpl::create(const RetryPolicy& route_policy,
-                                     Http::RequestHeaderMap& request_headers,
-                                     const Upstream::ClusterInfo& cluster, Runtime::Loader& runtime,
-                                     Runtime::RandomGenerator& random,
-                                     Event::Dispatcher& dispatcher,
-                                     Upstream::ResourcePriority priority) {
+RetryStatePtr
+RetryStateImpl::create(const RetryPolicy& route_policy, Http::RequestHeaderMap& request_headers,
+                       const Upstream::ClusterInfo& cluster, const VirtualCluster* vcluster,
+                       Runtime::Loader& runtime, Runtime::RandomGenerator& random,
+                       Event::Dispatcher& dispatcher, Upstream::ResourcePriority priority) {
   RetryStatePtr ret;
 
   // We short circuit here and do not bother with an allocation if there is no chance we will retry.
   if (request_headers.EnvoyRetryOn() || request_headers.EnvoyRetryGrpcOn() ||
       route_policy.retryOn()) {
-    ret.reset(new RetryStateImpl(route_policy, request_headers, cluster, runtime, random,
+    ret.reset(new RetryStateImpl(route_policy, request_headers, cluster, vcluster, runtime, random,
                                  dispatcher, priority));
   }
 
@@ -54,12 +53,13 @@ RetryStatePtr RetryStateImpl::create(const RetryPolicy& route_policy,
 
 RetryStateImpl::RetryStateImpl(const RetryPolicy& route_policy,
                                Http::RequestHeaderMap& request_headers,
-                               const Upstream::ClusterInfo& cluster, Runtime::Loader& runtime,
-                               Runtime::RandomGenerator& random, Event::Dispatcher& dispatcher,
-                               Upstream::ResourcePriority priority)
-    : cluster_(cluster), runtime_(runtime), random_(random), dispatcher_(dispatcher),
-      retry_on_(route_policy.retryOn()), retries_remaining_(route_policy.numRetries()),
-      priority_(priority), retry_host_predicates_(route_policy.retryHostPredicates()),
+                               const Upstream::ClusterInfo& cluster, const VirtualCluster* vcluster,
+                               Runtime::Loader& runtime, Runtime::RandomGenerator& random,
+                               Event::Dispatcher& dispatcher, Upstream::ResourcePriority priority)
+    : cluster_(cluster), vcluster_(vcluster), runtime_(runtime), random_(random),
+      dispatcher_(dispatcher), retry_on_(route_policy.retryOn()),
+      retries_remaining_(route_policy.numRetries()), priority_(priority),
+      retry_host_predicates_(route_policy.retryHostPredicates()),
       retry_priority_(route_policy.retryPriority()),
       retriable_status_codes_(route_policy.retriableStatusCodes()),
       retriable_headers_(route_policy.retriableHeaders()) {
@@ -83,11 +83,10 @@ RetryStateImpl::RetryStateImpl(const RetryPolicy& route_policy,
 
   // Merge in the headers.
   if (request_headers.EnvoyRetryOn()) {
-    retry_on_ |= parseRetryOn(request_headers.EnvoyRetryOn()->value().getStringView()).first;
+    retry_on_ |= parseRetryOn(request_headers.getEnvoyRetryOnValue()).first;
   }
   if (request_headers.EnvoyRetryGrpcOn()) {
-    retry_on_ |=
-        parseRetryGrpcOn(request_headers.EnvoyRetryGrpcOn()->value().getStringView()).first;
+    retry_on_ |= parseRetryGrpcOn(request_headers.getEnvoyRetryGrpcOnValue()).first;
   }
 
   const auto& retriable_request_headers = route_policy.retriableRequestHeaders();
@@ -107,15 +106,15 @@ RetryStateImpl::RetryStateImpl(const RetryPolicy& route_policy,
   }
   if (retry_on_ != 0 && request_headers.EnvoyMaxRetries()) {
     uint64_t temp;
-    if (absl::SimpleAtoi(request_headers.EnvoyMaxRetries()->value().getStringView(), &temp)) {
+    if (absl::SimpleAtoi(request_headers.getEnvoyMaxRetriesValue(), &temp)) {
       // The max retries header takes precedence if set.
       retries_remaining_ = temp;
     }
   }
 
   if (request_headers.EnvoyRetriableStatusCodes()) {
-    for (const auto code : StringUtil::splitToken(
-             request_headers.EnvoyRetriableStatusCodes()->value().getStringView(), ",")) {
+    for (const auto code :
+         StringUtil::splitToken(request_headers.getEnvoyRetriableStatusCodesValue(), ",")) {
       unsigned int out;
       if (absl::SimpleAtoi(code, &out)) {
         retriable_status_codes_.emplace_back(out);
@@ -153,7 +152,7 @@ void RetryStateImpl::enableBackoffTimer() {
 std::pair<uint32_t, bool> RetryStateImpl::parseRetryOn(absl::string_view config) {
   uint32_t ret = 0;
   bool all_fields_valid = true;
-  for (const auto retry_on : StringUtil::splitToken(config, ",")) {
+  for (const auto retry_on : StringUtil::splitToken(config, ",", false, true)) {
     if (retry_on == Http::Headers::get().EnvoyRetryOnValues._5xx) {
       ret |= RetryPolicy::RETRY_ON_5XX;
     } else if (retry_on == Http::Headers::get().EnvoyRetryOnValues.GatewayError) {
@@ -181,7 +180,7 @@ std::pair<uint32_t, bool> RetryStateImpl::parseRetryOn(absl::string_view config)
 std::pair<uint32_t, bool> RetryStateImpl::parseRetryGrpcOn(absl::string_view retry_grpc_on_header) {
   uint32_t ret = 0;
   bool all_fields_valid = true;
-  for (const auto retry_on : StringUtil::splitToken(retry_grpc_on_header, ",")) {
+  for (const auto retry_on : StringUtil::splitToken(retry_grpc_on_header, ",", false, true)) {
     if (retry_on == Http::Headers::get().EnvoyRetryOnGrpcValues.Cancelled) {
       ret |= RetryPolicy::RETRY_ON_GRPC_CANCELLED;
     } else if (retry_on == Http::Headers::get().EnvoyRetryOnGrpcValues.DeadlineExceeded) {
@@ -213,6 +212,9 @@ RetryStatus RetryStateImpl::shouldRetry(bool would_retry, DoRetryCallback callba
   // and it was successful.
   if (callback_ && !would_retry) {
     cluster_.stats().upstream_rq_retry_success_.inc();
+    if (vcluster_) {
+      vcluster_->stats().upstream_rq_retry_success_.inc();
+    }
   }
 
   resetRetry();
@@ -221,7 +223,13 @@ RetryStatus RetryStateImpl::shouldRetry(bool would_retry, DoRetryCallback callba
     return RetryStatus::No;
   }
 
+  // The request has exhausted the number of retries allotted to it by the retry policy configured
+  // (or the x-envoy-max-retries header).
   if (retries_remaining_ == 0) {
+    cluster_.stats().upstream_rq_retry_limit_exceeded_.inc();
+    if (vcluster_) {
+      vcluster_->stats().upstream_rq_retry_limit_exceeded_.inc();
+    }
     return RetryStatus::NoRetryLimitExceeded;
   }
 
@@ -229,6 +237,9 @@ RetryStatus RetryStateImpl::shouldRetry(bool would_retry, DoRetryCallback callba
 
   if (!cluster_.resourceManager(priority_).retries().canCreate()) {
     cluster_.stats().upstream_rq_retry_overflow_.inc();
+    if (vcluster_) {
+      vcluster_->stats().upstream_rq_retry_overflow_.inc();
+    }
     return RetryStatus::NoOverflow;
   }
 
@@ -240,6 +251,9 @@ RetryStatus RetryStateImpl::shouldRetry(bool would_retry, DoRetryCallback callba
   callback_ = callback;
   cluster_.resourceManager(priority_).retries().inc();
   cluster_.stats().upstream_rq_retry_.inc();
+  if (vcluster_) {
+    vcluster_->stats().upstream_rq_retry_.inc();
+  }
   enableBackoffTimer();
   return RetryStatus::Yes;
 }
@@ -266,10 +280,6 @@ RetryStatus RetryStateImpl::shouldHedgeRetryPerTryTimeout(DoRetryCallback callba
 }
 
 bool RetryStateImpl::wouldRetryFromHeaders(const Http::ResponseHeaderMap& response_headers) {
-  if (response_headers.EnvoyOverloaded() != nullptr) {
-    return false;
-  }
-
   // We never retry if the request is rate limited.
   if (response_headers.EnvoyRateLimited() != nullptr) {
     return false;

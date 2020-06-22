@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "envoy/network/io_handle.h"
 
 #include "common/network/io_socket_error_impl.h"
@@ -45,10 +47,42 @@ public:
   Api::IoCallUint64Result recvmsg(Buffer::RawSlice* slices, const uint64_t num_slice,
                                   uint32_t self_port, RecvMsgOutput& output) override {
     if (closed_) {
+      ASSERT(false, "recvmmsg is called after close.");
       return Api::IoCallUint64Result(0, Api::IoErrorPtr(new Network::IoSocketError(EBADF),
                                                         Network::IoSocketError::deleteIoError));
     }
     return io_handle_.recvmsg(slices, num_slice, self_port, output);
+  }
+  Api::IoCallUint64Result recvmmsg(RawSliceArrays& slices, uint32_t self_port,
+                                   RecvMsgOutput& output) override {
+    if (closed_) {
+      ASSERT(false, "recvmmsg is called after close.");
+      return Api::IoCallUint64Result(0, Api::IoErrorPtr(new Network::IoSocketError(EBADF),
+                                                        Network::IoSocketError::deleteIoError));
+    }
+    return io_handle_.recvmmsg(slices, self_port, output);
+  }
+  bool supportsMmsg() const override { return io_handle_.supportsMmsg(); }
+  Api::SysCallIntResult bind(const sockaddr* address, socklen_t addrlen) override {
+    return io_handle_.bind(address, addrlen);
+  }
+  Api::SysCallIntResult listen(int backlog) override { return io_handle_.listen(backlog); }
+  Api::SysCallIntResult connect(const sockaddr* address, socklen_t addrlen) override {
+    return io_handle_.connect(address, addrlen);
+  }
+  Api::SysCallIntResult setOption(int level, int optname, const void* optval,
+                                  socklen_t optlen) override {
+    return io_handle_.setOption(level, optname, optval, optlen);
+  }
+  Api::SysCallIntResult getOption(int level, int optname, void* optval,
+                                  socklen_t* optlen) override {
+    return io_handle_.getOption(level, optname, optval, optlen);
+  }
+  Api::SysCallIntResult getLocalAddress(sockaddr* address, socklen_t* addrlen) override {
+    return io_handle_.getLocalAddress(address, addrlen);
+  }
+  Api::SysCallIntResult setBlocking(bool blocking) override {
+    return io_handle_.setBlocking(blocking);
   }
 
 private:

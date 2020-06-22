@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iterator>
 #include <list>
 #include <map>
 #include <memory>
@@ -53,6 +54,9 @@ public:
   virtual RouteConstSharedPtr matches(const Http::RequestHeaderMap& headers,
                                       const StreamInfo::StreamInfo& stream_info,
                                       uint64_t random_value) const PURE;
+
+  // By default, matchers do not support null Path headers.
+  virtual bool supportsPathlessHeaders() const { return false; }
 };
 
 class PerFilterConfigs {
@@ -157,10 +161,11 @@ class VirtualHostImpl : public VirtualHost {
 public:
   VirtualHostImpl(const envoy::config::route::v3::VirtualHost& virtual_host,
                   const ConfigImpl& global_route_config,
-                  Server::Configuration::ServerFactoryContext& factory_context,
+                  Server::Configuration::ServerFactoryContext& factory_context, Stats::Scope& scope,
                   ProtobufMessage::ValidationVisitor& validator, bool validate_clusters);
 
-  RouteConstSharedPtr getRouteFromEntries(const Http::RequestHeaderMap& headers,
+  RouteConstSharedPtr getRouteFromEntries(const RouteCallback& cb,
+                                          const Http::RequestHeaderMap& headers,
                                           const StreamInfo::StreamInfo& stream_info,
                                           uint64_t random_value) const;
   const VirtualCluster* virtualClusterFromEntries(const Http::HeaderMap& headers) const;
@@ -174,7 +179,8 @@ public:
   const RateLimitPolicy& rateLimitPolicy() const override { return rate_limit_policy_; }
   const Config& routeConfig() const override;
   const RouteSpecificFilterConfig* perFilterConfig(const std::string&) const override;
-  bool includeAttemptCount() const override { return include_attempt_count_; }
+  bool includeAttemptCountInRequest() const override { return include_attempt_count_in_request_; }
+  bool includeAttemptCountInResponse() const override { return include_attempt_count_in_response_; }
   const absl::optional<envoy::config::route::v3::RetryPolicy>& retryPolicy() const {
     return retry_policy_;
   }
@@ -186,32 +192,38 @@ public:
 private:
   enum class SslRequirements { None, ExternalOnly, All };
 
-  struct VirtualClusterEntry : public VirtualCluster {
-    VirtualClusterEntry(const envoy::config::route::v3::VirtualCluster& virtual_cluster,
-                        Stats::StatNamePool& pool);
-
-    // Router::VirtualCluster
-    Stats::StatName statName() const override { return stat_name_; }
-
-    const Stats::StatName stat_name_;
-    std::vector<Http::HeaderUtility::HeaderDataPtr> headers_;
-  };
-
-  class CatchAllVirtualCluster : public VirtualCluster {
+  struct VirtualClusterBase : public VirtualCluster {
   public:
-    explicit CatchAllVirtualCluster(Stats::StatNamePool& pool) : stat_name_(pool.add("other")) {}
+    VirtualClusterBase(Stats::StatName stat_name, Stats::ScopePtr&& scope)
+        : stat_name_(stat_name), scope_(std::move(scope)), stats_(generateStats(*scope_)) {}
 
     // Router::VirtualCluster
     Stats::StatName statName() const override { return stat_name_; }
+    VirtualClusterStats& stats() const override { return stats_; }
 
   private:
     const Stats::StatName stat_name_;
+    Stats::ScopePtr scope_;
+    mutable VirtualClusterStats stats_;
+  };
+
+  struct VirtualClusterEntry : public VirtualClusterBase {
+    VirtualClusterEntry(const envoy::config::route::v3::VirtualCluster& virtual_cluster,
+                        Stats::StatNamePool& pool, Stats::Scope& scope);
+
+    std::vector<Http::HeaderUtility::HeaderDataPtr> headers_;
+  };
+
+  struct CatchAllVirtualCluster : public VirtualClusterBase {
+    explicit CatchAllVirtualCluster(Stats::StatNamePool& pool, Stats::Scope& scope)
+        : VirtualClusterBase(pool.add("other"), scope.createScope("other")) {}
   };
 
   static const std::shared_ptr<const SslRedirectRoute> SSL_REDIRECT_ROUTE;
 
   Stats::StatNamePool stat_name_pool_;
   const Stats::StatName stat_name_;
+  Stats::ScopePtr vcluster_scope_;
   std::vector<RouteEntryImplBaseConstSharedPtr> routes_;
   std::vector<VirtualClusterEntry> virtual_clusters_;
   SslRequirements ssl_requirements_;
@@ -223,7 +235,8 @@ private:
   HeaderParserPtr response_headers_parser_;
   PerFilterConfigs per_filter_configs_;
   uint32_t retry_shadow_buffer_limit_{std::numeric_limits<uint32_t>::max()};
-  const bool include_attempt_count_;
+  const bool include_attempt_count_in_request_;
+  const bool include_attempt_count_in_response_;
   absl::optional<envoy::config::route::v3::RetryPolicy> retry_policy_;
   absl::optional<envoy::config::route::v3::HedgePolicy> hedge_policy_;
   const CatchAllVirtualCluster virtual_cluster_catch_all_;
@@ -296,11 +309,13 @@ public:
   const std::string& cluster() const override { return cluster_; }
   const std::string& runtimeKey() const override { return runtime_key_; }
   const envoy::type::v3::FractionalPercent& defaultValue() const override { return default_value_; }
+  bool traceSampled() const override { return trace_sampled_; }
 
 private:
   std::string cluster_;
   std::string runtime_key_;
   envoy::type::v3::FractionalPercent default_value_;
+  bool trace_sampled_;
 };
 
 /**
@@ -372,6 +387,46 @@ private:
 };
 
 /**
+ * Implementation of InternalRedirectPolicy that reads from the proto
+ * InternalRedirectPolicy of the RouteAction.
+ */
+class InternalRedirectPolicyImpl : public InternalRedirectPolicy {
+public:
+  // Constructor that enables internal redirect with policy_config controlling the configurable
+  // behaviors.
+  explicit InternalRedirectPolicyImpl(
+      const envoy::config::route::v3::InternalRedirectPolicy& policy_config,
+      ProtobufMessage::ValidationVisitor& validator, absl::string_view current_route_name);
+  // Default constructor that disables internal redirect.
+  InternalRedirectPolicyImpl() = default;
+
+  bool enabled() const override { return enabled_; }
+
+  bool shouldRedirectForResponseCode(const Http::Code& response_code) const override {
+    return redirect_response_codes_.contains(response_code);
+  }
+
+  std::vector<InternalRedirectPredicateSharedPtr> predicates() const override;
+
+  uint32_t maxInternalRedirects() const override { return max_internal_redirects_; }
+
+  bool isCrossSchemeRedirectAllowed() const override { return allow_cross_scheme_redirect_; }
+
+private:
+  absl::flat_hash_set<Http::Code> buildRedirectResponseCodes(
+      const envoy::config::route::v3::InternalRedirectPolicy& policy_config) const;
+
+  const std::string current_route_name_;
+  const absl::flat_hash_set<Http::Code> redirect_response_codes_;
+  const uint32_t max_internal_redirects_{1};
+  const bool enabled_{false};
+  const bool allow_cross_scheme_redirect_{false};
+
+  std::vector<std::pair<InternalRedirectPredicateFactory*, ProtobufTypes::MessagePtr>>
+      predicate_factories_;
+};
+
+/**
  * Base implementation for all route entries.
  */
 class RouteEntryImplBase : public RouteEntry,
@@ -427,6 +482,9 @@ public:
   Upstream::ResourcePriority priority() const override { return priority_; }
   const RateLimitPolicy& rateLimitPolicy() const override { return rate_limit_policy_; }
   const RetryPolicy& retryPolicy() const override { return retry_policy_; }
+  const InternalRedirectPolicy& internalRedirectPolicy() const override {
+    return internal_redirect_policy_;
+  }
   uint32_t retryShadowBufferLimit() const override { return retry_shadow_buffer_limit_; }
   const std::vector<ShadowPolicyPtr>& shadowPolicies() const override { return shadow_policies_; }
   const VirtualCluster* virtualCluster(const Http::HeaderMap& headers) const override {
@@ -449,12 +507,14 @@ public:
   const envoy::config::core::v3::Metadata& metadata() const override { return metadata_; }
   const Envoy::Config::TypedMetadata& typedMetadata() const override { return typed_metadata_; }
   const PathMatchCriterion& pathMatchCriterion() const override { return *this; }
-  bool includeAttemptCount() const override { return vhost_.includeAttemptCount(); }
-  const UpgradeMap& upgradeMap() const override { return upgrade_map_; }
-  InternalRedirectAction internalRedirectAction() const override {
-    return internal_redirect_action_;
+  bool includeAttemptCountInRequest() const override {
+    return vhost_.includeAttemptCountInRequest();
   }
-  uint32_t maxInternalRedirects() const override { return max_internal_redirects_; }
+  bool includeAttemptCountInResponse() const override {
+    return vhost_.includeAttemptCountInResponse();
+  }
+  const absl::optional<ConnectConfig>& connectConfig() const override { return connect_config_; }
+  const UpgradeMap& upgradeMap() const override { return upgrade_map_; }
 
   // Router::DirectResponseEntry
   std::string newPath(const Http::RequestHeaderMap& headers) const override;
@@ -479,6 +539,7 @@ protected:
   std::string regex_rewrite_substitution_;
   const std::string host_rewrite_;
   bool include_vh_rate_limits_;
+  absl::optional<ConnectConfig> connect_config_;
 
   RouteConstSharedPtr clusterEntry(const Http::HeaderMap& headers, uint64_t random_value) const;
 
@@ -526,6 +587,9 @@ private:
     Upstream::ResourcePriority priority() const override { return parent_->priority(); }
     const RateLimitPolicy& rateLimitPolicy() const override { return parent_->rateLimitPolicy(); }
     const RetryPolicy& retryPolicy() const override { return parent_->retryPolicy(); }
+    const InternalRedirectPolicy& internalRedirectPolicy() const override {
+      return parent_->internalRedirectPolicy();
+    }
     uint32_t retryShadowBufferLimit() const override { return parent_->retryShadowBufferLimit(); }
     const std::vector<ShadowPolicyPtr>& shadowPolicies() const override {
       return parent_->shadowPolicies();
@@ -538,7 +602,7 @@ private:
       return parent_->maxGrpcTimeout();
     }
     absl::optional<std::chrono::milliseconds> grpcTimeoutOffset() const override {
-      return parent_->maxGrpcTimeout();
+      return parent_->grpcTimeoutOffset();
     }
     const MetadataMatchCriteria* metadataMatchCriteria() const override {
       return parent_->metadataMatchCriteria();
@@ -570,12 +634,16 @@ private:
       return parent_->pathMatchCriterion();
     }
 
-    bool includeAttemptCount() const override { return parent_->includeAttemptCount(); }
-    const UpgradeMap& upgradeMap() const override { return parent_->upgradeMap(); }
-    InternalRedirectAction internalRedirectAction() const override {
-      return parent_->internalRedirectAction();
+    bool includeAttemptCountInRequest() const override {
+      return parent_->includeAttemptCountInRequest();
     }
-    uint32_t maxInternalRedirects() const override { return parent_->maxInternalRedirects(); }
+    bool includeAttemptCountInResponse() const override {
+      return parent_->includeAttemptCountInResponse();
+    }
+    const absl::optional<ConnectConfig>& connectConfig() const override {
+      return parent_->connectConfig();
+    }
+    const UpgradeMap& upgradeMap() const override { return parent_->upgradeMap(); }
 
     // Router::Route
     const DirectResponseEntry* directResponseEntry() const override { return nullptr; }
@@ -664,6 +732,11 @@ private:
                    const envoy::config::route::v3::RouteAction& route_config,
                    ProtobufMessage::ValidationVisitor& validation_visitor) const;
 
+  InternalRedirectPolicyImpl
+  buildInternalRedirectPolicy(const envoy::config::route::v3::RouteAction& route_config,
+                              ProtobufMessage::ValidationVisitor& validator,
+                              absl::string_view current_route_name) const;
+
   // Default timeout is 15s if nothing is specified in the route config.
   static const uint64_t DEFAULT_ROUTE_TIMEOUT_MS = 15000;
 
@@ -690,6 +763,7 @@ private:
   const bool strip_query_;
   const HedgePolicyImpl hedge_policy_;
   const RetryPolicyImpl retry_policy_;
+  const InternalRedirectPolicyImpl internal_redirect_policy_;
   const RateLimitPolicyImpl rate_limit_policy_;
   std::vector<ShadowPolicyPtr> shadow_policies_;
   const Upstream::ResourcePriority priority_;
@@ -719,8 +793,6 @@ private:
   PerFilterConfigs per_filter_configs_;
   const std::string route_name_;
   TimeSource& time_source_;
-  InternalRedirectAction internal_redirect_action_;
-  uint32_t max_internal_redirects_{1};
 };
 
 /**
@@ -805,6 +877,29 @@ private:
 };
 
 /**
+ * Route entry implementation for CONNECT requests.
+ */
+class ConnectRouteEntryImpl : public RouteEntryImplBase {
+public:
+  ConnectRouteEntryImpl(const VirtualHostImpl& vhost, const envoy::config::route::v3::Route& route,
+                        Server::Configuration::ServerFactoryContext& factory_context,
+                        ProtobufMessage::ValidationVisitor& validator);
+
+  // Router::PathMatchCriterion
+  const std::string& matcher() const override { return EMPTY_STRING; }
+  PathMatchType matchType() const override { return PathMatchType::None; }
+
+  // Router::Matchable
+  RouteConstSharedPtr matches(const Http::RequestHeaderMap& headers,
+                              const StreamInfo::StreamInfo& stream_info,
+                              uint64_t random_value) const override;
+
+  // Router::DirectResponseEntry
+  void rewritePathHeader(Http::RequestHeaderMap&, bool) const override;
+
+  bool supportsPathlessHeaders() const override { return true; }
+};
+/**
  * Wraps the route configuration which matches an incoming request headers to a backend cluster.
  * This is split out mainly to help with unit testing.
  */
@@ -815,7 +910,7 @@ public:
                Server::Configuration::ServerFactoryContext& factory_context,
                ProtobufMessage::ValidationVisitor& validator, bool validate_clusters);
 
-  RouteConstSharedPtr route(const Http::RequestHeaderMap& headers,
+  RouteConstSharedPtr route(const RouteCallback& cb, const Http::RequestHeaderMap& headers,
                             const StreamInfo::StreamInfo& stream_info, uint64_t random_value) const;
 
   const VirtualHostImpl* findVirtualHost(const Http::RequestHeaderMap& headers) const;
@@ -828,6 +923,7 @@ private:
                                                  const WildcardVirtualHosts& wildcard_virtual_hosts,
                                                  SubstringFunction substring_function) const;
 
+  Stats::ScopePtr vhost_scope_;
   std::unordered_map<std::string, VirtualHostSharedPtr> virtual_hosts_;
   // std::greater as a minor optimization to iterate from more to less specific
   //
@@ -864,8 +960,12 @@ public:
   RouteConstSharedPtr route(const Http::RequestHeaderMap& headers,
                             const StreamInfo::StreamInfo& stream_info,
                             uint64_t random_value) const override {
-    return route_matcher_->route(headers, stream_info, random_value);
+    return route(nullptr, headers, stream_info, random_value);
   }
+
+  RouteConstSharedPtr route(const RouteCallback& cb, const Http::RequestHeaderMap& headers,
+                            const StreamInfo::StreamInfo& stream_info,
+                            uint64_t random_value) const override;
 
   const std::list<Http::LowerCaseString>& internalOnlyHeaders() const override {
     return internal_only_headers_;
@@ -898,6 +998,11 @@ public:
   // Router::Config
   RouteConstSharedPtr route(const Http::RequestHeaderMap&, const StreamInfo::StreamInfo&,
                             uint64_t) const override {
+    return nullptr;
+  }
+
+  RouteConstSharedPtr route(const RouteCallback&, const Http::RequestHeaderMap&,
+                            const StreamInfo::StreamInfo&, uint64_t) const override {
     return nullptr;
   }
 

@@ -1,5 +1,5 @@
-#include "envoy/config/filter/udp/udp_proxy/v2alpha/udp_proxy.pb.h"
-#include "envoy/config/filter/udp/udp_proxy/v2alpha/udp_proxy.pb.validate.h"
+#include "envoy/extensions/filters/udp/udp_proxy/v3/udp_proxy.pb.h"
+#include "envoy/extensions/filters/udp/udp_proxy/v3/udp_proxy.pb.validate.h"
 
 #include "extensions/filters/udp/udp_proxy/udp_proxy_filter.h"
 
@@ -66,6 +66,7 @@ public:
                               int send_sys_errno = 0) {
       EXPECT_CALL(*idle_timer_, enableTimer(parent_.config_->sessionTimeout(), nullptr));
 
+      EXPECT_CALL(*io_handle_, supportsMmsg());
       // Return the datagram.
       EXPECT_CALL(*io_handle_, recvmsg(_, 1, _, _))
           .WillOnce(
@@ -77,11 +78,10 @@ public:
                 } else {
                   ASSERT(data.size() <= slices[0].len_);
                   memcpy(slices[0].mem_, data.data(), data.size());
-                  output.peer_address_ = upstream_address_;
+                  output.msg_[0].peer_address_ = upstream_address_;
                   return makeNoError(data.size());
                 }
               }));
-
       if (recv_sys_errno == 0) {
         // Send the datagram downstream.
         EXPECT_CALL(parent_.callbacks_.udp_listener_, send(_))
@@ -97,6 +97,7 @@ public:
               }
             }));
         // Return an EAGAIN result.
+        EXPECT_CALL(*io_handle_, supportsMmsg());
         EXPECT_CALL(*io_handle_, recvmsg(_, 1, _, _))
             .WillOnce(Return(ByMove(Api::IoCallUint64Result(
                 0, Api::IoErrorPtr(Network::IoSocketError::getIoSocketEagainInstance(),
@@ -124,10 +125,10 @@ public:
         .WillRepeatedly(Return(Upstream::Host::Health::Healthy));
   }
 
-  ~UdpProxyFilterTest() { EXPECT_CALL(callbacks_.udp_listener_, onDestroy()); }
+  ~UdpProxyFilterTest() override { EXPECT_CALL(callbacks_.udp_listener_, onDestroy()); }
 
   void setup(const std::string& yaml, bool has_cluster = true) {
-    envoy::config::filter::udp::udp_proxy::v2alpha::UdpProxyConfig config;
+    envoy::extensions::filters::udp::udp_proxy::v3::UdpProxyConfig config;
     TestUtility::loadFromYamlAndValidate(yaml, config);
     config_ = std::make_shared<UdpProxyFilterConfig>(cluster_manager_, time_system_, stats_store_,
                                                      config);

@@ -1,10 +1,10 @@
-licenses(["notice"])  # Apache 2
-
 load(
     "//bazel:envoy_build_system.bzl",
     "envoy_cc_library",
     "envoy_package",
 )
+
+licenses(["notice"])  # Apache 2
 
 envoy_package()
 
@@ -53,6 +53,7 @@ envoy_cc_library(
     hdrs = ["subscription.h"],
     deps = [
         "//include/envoy/stats:stats_macros",
+        "//source/common/config:api_type_oracle_lib",
         "//source/common/protobuf",
         "@envoy_api//envoy/service/discovery/v3:pkg_cc_proto",
     ],

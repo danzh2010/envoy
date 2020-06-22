@@ -89,7 +89,7 @@ TEST_P(SslIntegrationTest, RouterRequestAndResponseWithGiantBodyBuffer) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection({});
   };
-  testRouterRequestAndResponseWithBody(16 * 1024 * 1024, 16 * 1024 * 1024, false, &creator);
+  testRouterRequestAndResponseWithBody(16 * 1024 * 1024, 16 * 1024 * 1024, false, false, &creator);
   checkStats();
 }
 
@@ -97,7 +97,7 @@ TEST_P(SslIntegrationTest, RouterRequestAndResponseWithBodyNoBuffer) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection({});
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -108,7 +108,7 @@ TEST_P(SslIntegrationTest, RouterRequestAndResponseWithBodyNoBufferHttp2) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(ClientSslTransportOptions().setAlpn(true));
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -116,7 +116,7 @@ TEST_P(SslIntegrationTest, RouterRequestAndResponseWithBodyNoBufferVerifySAN) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(ClientSslTransportOptions().setSan(true));
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -125,7 +125,7 @@ TEST_P(SslIntegrationTest, RouterRequestAndResponseWithBodyNoBufferHttp2VerifySA
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(ClientSslTransportOptions().setAlpn(true).setSan(true));
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -174,7 +174,7 @@ TEST_P(SslIntegrationTest, AdminCertEndpoint) {
   BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
       lookupPort("admin"), "GET", "/certs", "", downstreamProtocol(), version_);
   EXPECT_TRUE(response->complete());
-  EXPECT_EQ("200", response->headers().Status()->value().getStringView());
+  EXPECT_EQ("200", response->headers().getStatusValue());
 }
 
 // Validate certificate selection across different certificate types and client TLS versions.
@@ -244,7 +244,7 @@ TEST_P(SslCertficateIntegrationTest, ServerRsa) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection({});
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -255,7 +255,7 @@ TEST_P(SslCertficateIntegrationTest, ServerEcdsa) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection({});
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -266,7 +266,7 @@ TEST_P(SslCertficateIntegrationTest, ServerRsaEcdsa) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection({});
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -277,7 +277,7 @@ TEST_P(SslCertficateIntegrationTest, ClientRsaOnly) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(rsaOnlyClientOptions());
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -302,7 +302,7 @@ TEST_P(SslCertficateIntegrationTest, ServerRsaEcdsaClientRsaOnly) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(rsaOnlyClientOptions());
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -329,7 +329,7 @@ TEST_P(SslCertficateIntegrationTest, ServerEcdsaClientEcdsaOnly) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(ecdsaOnlyClientOptions());
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -341,7 +341,7 @@ TEST_P(SslCertficateIntegrationTest, ServerRsaEcdsaClientEcdsaOnly) {
   ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
     return makeSslClientConnection(ecdsaOnlyClientOptions());
   };
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
 }
 
@@ -436,7 +436,7 @@ TEST_P(SslTapIntegrationTest, TwoRequestsWithBinaryProto) {
   // First request (ID will be +1 since the client will also bump).
   const uint64_t first_id = Network::ConnectionImpl::nextGlobalIdForTest() + 1;
   codec_client_ = makeHttpConnection(creator());
-  Http::TestHeaderMapImpl post_request_headers{
+  Http::TestRequestHeaderMapImpl post_request_headers{
       {":method", "POST"},    {":path", "/test/long/url"}, {":scheme", "http"},
       {":authority", "host"}, {"x-lyft-user-id", "123"},   {"x-forwarded-for", "10.0.0.1"}};
   auto response =
@@ -444,7 +444,7 @@ TEST_P(SslTapIntegrationTest, TwoRequestsWithBinaryProto) {
   EXPECT_TRUE(upstream_request_->complete());
   EXPECT_EQ(128, upstream_request_->bodyLength());
   ASSERT_TRUE(response->complete());
-  EXPECT_EQ("200", response->headers().Status()->value().getStringView());
+  EXPECT_EQ("200", response->headers().getStatusValue());
   EXPECT_EQ(256, response->body().size());
   checkStats();
   envoy::config::core::v3::Address expected_local_address;
@@ -474,7 +474,7 @@ TEST_P(SslTapIntegrationTest, TwoRequestsWithBinaryProto) {
   // Verify a second request hits a different file.
   const uint64_t second_id = Network::ConnectionImpl::nextGlobalIdForTest() + 1;
   codec_client_ = makeHttpConnection(creator());
-  Http::TestHeaderMapImpl get_request_headers{
+  Http::TestRequestHeaderMapImpl get_request_headers{
       {":method", "GET"},     {":path", "/test/long/url"}, {":scheme", "http"},
       {":authority", "host"}, {"x-lyft-user-id", "123"},   {"x-forwarded-for", "10.0.0.1"}};
   response =
@@ -482,7 +482,7 @@ TEST_P(SslTapIntegrationTest, TwoRequestsWithBinaryProto) {
   EXPECT_TRUE(upstream_request_->complete());
   EXPECT_EQ(128, upstream_request_->bodyLength());
   ASSERT_TRUE(response->complete());
-  EXPECT_EQ("200", response->headers().Status()->value().getStringView());
+  EXPECT_EQ("200", response->headers().getStatusValue());
   EXPECT_EQ(256, response->body().size());
   checkStats();
   codec_client_->close();
@@ -550,7 +550,7 @@ TEST_P(SslTapIntegrationTest, RequestWithTextProto) {
     return makeSslClientConnection({});
   };
   const uint64_t id = Network::ConnectionImpl::nextGlobalIdForTest() + 1;
-  testRouterRequestAndResponseWithBody(1024, 512, false, &creator);
+  testRouterRequestAndResponseWithBody(1024, 512, false, false, &creator);
   checkStats();
   codec_client_->close();
   test_server_->waitForCounterGe("http.config_test.downstream_cx_destroy", 1);
@@ -576,7 +576,7 @@ TEST_P(SslTapIntegrationTest, RequestWithJsonBodyAsStringUpstreamTap) {
     return makeSslClientConnection({});
   };
   const uint64_t id = Network::ConnectionImpl::nextGlobalIdForTest() + 2;
-  testRouterRequestAndResponseWithBody(512, 1024, false, &creator);
+  testRouterRequestAndResponseWithBody(512, 1024, false, false, &creator);
   checkStats();
   codec_client_->close();
   test_server_->waitForCounterGe("http.config_test.downstream_cx_destroy", 1);

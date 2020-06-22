@@ -9,7 +9,7 @@
 
 #include "common/common/logger.h"
 #include "common/common/matchers.h"
-#include "common/runtime/runtime_protos.h"
+#include "common/router/header_parser.h"
 
 #include "extensions/filters/common/ext_authz/ext_authz.h"
 
@@ -99,14 +99,14 @@ public:
   const MatcherSharedPtr& upstreamHeaderMatchers() const { return upstream_header_matchers_; }
 
   /**
-   * Returns a list of headers that will be add to the authorization request.
-   */
-  const Http::LowerCaseStrPairVector& headersToAdd() const { return authorization_headers_to_add_; }
-
-  /**
    * Returns the name used for tracing.
    */
   const std::string& tracingName() { return tracing_name_; }
+
+  /**
+   * Returns the configured request header parser.
+   */
+  const Router::HeaderParser& requestHeaderParser() const { return *request_headers_parser_; }
 
 private:
   static MatcherSharedPtr
@@ -118,8 +118,6 @@ private:
   static MatcherSharedPtr
   toUpstreamMatchers(const envoy::type::matcher::v3::ListStringMatcher& matcher,
                      bool enable_case_sensitive_string_matcher);
-  static Http::LowerCaseStrPairVector
-  toHeadersAdd(const Protobuf::RepeatedPtrField<envoy::config::core::v3::HeaderValue>&);
 
   const bool enable_case_sensitive_string_matcher_;
   const MatcherSharedPtr request_header_matchers_;
@@ -130,6 +128,7 @@ private:
   const std::chrono::milliseconds timeout_;
   const std::string path_prefix_;
   const std::string tracing_name_;
+  Router::HeaderParserPtr request_headers_parser_;
 };
 
 using ClientConfigSharedPtr = std::shared_ptr<ClientConfig>;
@@ -152,11 +151,12 @@ public:
   // ExtAuthz::Client
   void cancel() override;
   void check(RequestCallbacks& callbacks, const envoy::service::auth::v3::CheckRequest& request,
-             Tracing::Span&) override;
+             Tracing::Span& parent_span, const StreamInfo::StreamInfo& stream_info) override;
 
   // Http::AsyncClient::Callbacks
-  void onSuccess(Http::ResponseMessagePtr&& message) override;
-  void onFailure(Http::AsyncClient::FailureReason reason) override;
+  void onSuccess(const Http::AsyncClient::Request&, Http::ResponseMessagePtr&& message) override;
+  void onFailure(const Http::AsyncClient::Request&,
+                 Http::AsyncClient::FailureReason reason) override;
 
 private:
   ResponsePtr toResponse(Http::ResponseMessagePtr message);

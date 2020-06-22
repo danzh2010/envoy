@@ -119,11 +119,6 @@ public:
     }
 
     /**
-     * @return the number of uint8_t entries we collected while adding symbols.
-     */
-    uint64_t dataBytesRequired() const { return data_bytes_required_; }
-
-    /**
      * Moves the contents of the vector into an allocated array. The array
      * must have been allocated with bytesRequired() bytes.
      *
@@ -174,8 +169,6 @@ public:
      */
     static std::pair<uint64_t, uint64_t> decodeNumber(const uint8_t* encoding);
 
-    StoragePtr release() { return mem_block_.release(); }
-
   private:
     uint64_t data_bytes_required_{0};
     MemBlockBuilder<uint8_t> mem_block_;
@@ -206,6 +199,7 @@ public:
   void clearRecentLookups() override;
   void setRecentLookupCapacity(uint64_t capacity) override;
   uint64_t recentLookupCapacity() const override;
+  DynamicSpans getDynamicSpans(StatName stat_name) const override;
 
 private:
   friend class StatName;
@@ -300,7 +294,7 @@ private:
 class StatNameStorageBase {
 public:
   StatNameStorageBase(SymbolTable::StoragePtr&& bytes) : bytes_(std::move(bytes)) {}
-  StatNameStorageBase() {}
+  StatNameStorageBase() = default;
 
   /**
    * @return a reference to the owned storage.
@@ -464,11 +458,6 @@ public:
   const uint8_t* dataIncludingSize() const { return size_and_data_; }
 
   /**
-   * @return A pointer to the buffer, including the size bytes.
-   */
-  const uint8_t* sizeAndData() const { return size_and_data_; }
-
-  /**
    * @return whether this is empty.
    */
   bool empty() const { return size_and_data_ == nullptr || dataSize() == 0; }
@@ -502,6 +491,8 @@ public:
   // generate symbols for it.
   StatNameManagedStorage(absl::string_view name, SymbolTable& table)
       : StatNameStorage(name, table), symbol_table_(table) {}
+  StatNameManagedStorage(StatNameManagedStorage&& src)
+      : StatNameStorage(std::move(src)), symbol_table_(src.symbol_table_) {}
 
   ~StatNameManagedStorage() { free(symbol_table_); }
 
@@ -603,11 +594,6 @@ private:
 class StatNameDynamicPool {
 public:
   explicit StatNameDynamicPool(SymbolTable& symbol_table) : symbol_table_(symbol_table) {}
-
-  /**
-   * Removes all StatNames from the pool.
-   */
-  void clear() { storage_vector_.clear(); }
 
   /**
    * @param name the name to add the container.

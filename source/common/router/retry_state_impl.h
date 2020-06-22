@@ -26,9 +26,9 @@ class RetryStateImpl : public RetryState {
 public:
   static RetryStatePtr create(const RetryPolicy& route_policy,
                               Http::RequestHeaderMap& request_headers,
-                              const Upstream::ClusterInfo& cluster, Runtime::Loader& runtime,
-                              Runtime::RandomGenerator& random, Event::Dispatcher& dispatcher,
-                              Upstream::ResourcePriority priority);
+                              const Upstream::ClusterInfo& cluster, const VirtualCluster* vcluster,
+                              Runtime::Loader& runtime, Runtime::RandomGenerator& random,
+                              Event::Dispatcher& dispatcher, Upstream::ResourcePriority priority);
   ~RetryStateImpl() override;
 
   /**
@@ -74,22 +74,24 @@ public:
         [&host](auto predicate) { return predicate->shouldSelectAnotherHost(host); });
   }
 
-  const Upstream::HealthyAndDegradedLoad&
-  priorityLoadForRetry(const Upstream::PrioritySet& priority_set,
-                       const Upstream::HealthyAndDegradedLoad& original_priority_load) override {
+  const Upstream::HealthyAndDegradedLoad& priorityLoadForRetry(
+      const Upstream::PrioritySet& priority_set,
+      const Upstream::HealthyAndDegradedLoad& original_priority_load,
+      const Upstream::RetryPriority::PriorityMappingFunc& priority_mapping_func) override {
     if (!retry_priority_) {
       return original_priority_load;
     }
-    return retry_priority_->determinePriorityLoad(priority_set, original_priority_load);
+    return retry_priority_->determinePriorityLoad(priority_set, original_priority_load,
+                                                  priority_mapping_func);
   }
 
   uint32_t hostSelectionMaxAttempts() const override { return host_selection_max_attempts_; }
 
 private:
   RetryStateImpl(const RetryPolicy& route_policy, Http::RequestHeaderMap& request_headers,
-                 const Upstream::ClusterInfo& cluster, Runtime::Loader& runtime,
-                 Runtime::RandomGenerator& random, Event::Dispatcher& dispatcher,
-                 Upstream::ResourcePriority priority);
+                 const Upstream::ClusterInfo& cluster, const VirtualCluster* vcluster,
+                 Runtime::Loader& runtime, Runtime::RandomGenerator& random,
+                 Event::Dispatcher& dispatcher, Upstream::ResourcePriority priority);
 
   void enableBackoffTimer();
   void resetRetry();
@@ -97,6 +99,7 @@ private:
   RetryStatus shouldRetry(bool would_retry, DoRetryCallback callback);
 
   const Upstream::ClusterInfo& cluster_;
+  const VirtualCluster* vcluster_;
   Runtime::Loader& runtime_;
   Runtime::RandomGenerator& random_;
   Event::Dispatcher& dispatcher_;

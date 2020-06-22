@@ -26,6 +26,7 @@
 #endif
 
 #include "gtest/gtest.h"
+#include "gmock/gmock.h"
 
 namespace Envoy {
 namespace {
@@ -53,13 +54,8 @@ INSTANTIATE_TEST_SUITE_P(CorpusExamples, FuzzerCorpusTest, testing::ValuesIn(tes
 } // namespace Envoy
 
 int main(int argc, char** argv) {
-#ifndef __APPLE__
-  absl::InitializeSymbolizer(argv[0]);
-#endif
-#ifdef ENVOY_HANDLE_SIGNALS
-  // Enabled by default. Control with "bazel --define=signal_trace=disabled"
-  Envoy::SignalAction handle_sigs;
-#endif
+  Envoy::TestEnvironment::initializeTestMain(argv[0]);
+
   // Expected usage: <test path> <corpus paths..> [other gtest flags]
   RELEASE_ASSERT(argc >= 2, "");
   // Consider any file after the test path which doesn't have a - prefix to be a corpus entry.
@@ -90,6 +86,7 @@ int main(int argc, char** argv) {
   }
 
   testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleMock(&argc, argv);
   Envoy::Fuzz::Runner::setupEnvironment(argc, argv, spdlog::level::info);
 
   return RUN_ALL_TESTS();

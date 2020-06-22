@@ -17,9 +17,9 @@ namespace Config {
 SubscriptionFactoryImpl::SubscriptionFactoryImpl(
     const LocalInfo::LocalInfo& local_info, Event::Dispatcher& dispatcher,
     Upstream::ClusterManager& cm, Runtime::RandomGenerator& random,
-    ProtobufMessage::ValidationVisitor& validation_visitor, Api::Api& api)
+    ProtobufMessage::ValidationVisitor& validation_visitor, Api::Api& api, Runtime::Loader& runtime)
     : local_info_(local_info), dispatcher_(dispatcher), cm_(cm), random_(random),
-      validation_visitor_(validation_visitor), api_(api) {}
+      validation_visitor_(validation_visitor), api_(api), runtime_(runtime) {}
 
 SubscriptionPtr SubscriptionFactoryImpl::subscriptionFromConfigSource(
     const envoy::config::core::v3::ConfigSource& config, absl::string_view type_url,
@@ -27,6 +27,15 @@ SubscriptionPtr SubscriptionFactoryImpl::subscriptionFromConfigSource(
   Config::Utility::checkLocalInfo(type_url, local_info_);
   std::unique_ptr<Subscription> result;
   SubscriptionStats stats = Utility::generateStats(scope);
+
+  const auto transport_api_version = config.api_config_source().transport_api_version();
+  if (transport_api_version == envoy::config::core::v3::ApiVersion::V2 &&
+      runtime_.snapshot().runtimeFeatureEnabled(
+          "envoy.reloadable_features.enable_deprecated_v2_api_warning")) {
+    runtime_.snapshot().countDeprecatedFeatureUse();
+    ENVOY_LOG(warn,
+              "xDS of version v2 has been deprecated and will be removed in subsequent versions");
+  }
 
   switch (config.config_source_specifier_case()) {
   case envoy::config::core::v3::ConfigSource::ConfigSourceSpecifierCase::kPath: {
@@ -36,7 +45,8 @@ SubscriptionPtr SubscriptionFactoryImpl::subscriptionFromConfigSource(
   }
   case envoy::config::core::v3::ConfigSource::ConfigSourceSpecifierCase::kApiConfigSource: {
     const envoy::config::core::v3::ApiConfigSource& api_config_source = config.api_config_source();
-    Utility::checkApiConfigSourceSubscriptionBackingCluster(cm_.clusters(), api_config_source);
+    Utility::checkApiConfigSourceSubscriptionBackingCluster(cm_.primaryClusters(),
+                                                            api_config_source);
 
     switch (api_config_source.api_type()) {
     case envoy::config::core::v3::ApiConfigSource::hidden_envoy_deprecated_UNSUPPORTED_REST_LEGACY:
@@ -56,7 +66,7 @@ SubscriptionPtr SubscriptionFactoryImpl::subscriptionFromConfigSource(
           std::make_shared<Config::GrpcMuxImpl>(
               local_info_,
               Utility::factoryForGrpcApiConfigSource(cm_.grpcAsyncClientManager(),
-                                                     api_config_source, scope)
+                                                     api_config_source, scope, true)
                   ->create(),
               dispatcher_, sotwGrpcMethod(type_url), api_config_source.transport_api_version(),
               random_, scope, Utility::parseRateLimitSettings(api_config_source),
@@ -64,11 +74,10 @@ SubscriptionPtr SubscriptionFactoryImpl::subscriptionFromConfigSource(
           callbacks, stats, type_url, dispatcher_, Utility::configSourceInitialFetchTimeout(config),
           /*is_aggregated*/ false);
     case envoy::config::core::v3::ApiConfigSource::DELTA_GRPC: {
-      Utility::checkApiConfigSourceSubscriptionBackingCluster(cm_.clusters(), api_config_source);
       return std::make_unique<GrpcSubscriptionImpl>(
           std::make_shared<Config::NewGrpcMuxImpl>(
               Config::Utility::factoryForGrpcApiConfigSource(cm_.grpcAsyncClientManager(),
-                                                             api_config_source, scope)
+                                                             api_config_source, scope, true)
                   ->create(),
               dispatcher_, deltaGrpcMethod(type_url), api_config_source.transport_api_version(),
               random_, scope, Utility::parseRateLimitSettings(api_config_source), local_info_),

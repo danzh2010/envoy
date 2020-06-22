@@ -1,6 +1,6 @@
 #include "common/http/utility.h"
 
-#include "test/common/http/utility_fuzz.pb.h"
+#include "test/common/http/utility_fuzz.pb.validate.h"
 #include "test/fuzz/fuzz_runner.h"
 #include "test/fuzz/utility.h"
 #include "test/test_common/utility.h"
@@ -10,6 +10,12 @@ namespace Fuzz {
 namespace {
 
 DEFINE_PROTO_FUZZER(const test::common::http::UtilityTestCase& input) {
+  try {
+    TestUtility::validate(input);
+  } catch (ProtoValidationException& e) {
+    ENVOY_LOG_MISC(debug, "ProtoValidationException: {}", e.what());
+    return;
+  }
   switch (input.utility_selector_case()) {
   case test::common::http::UtilityTestCase::kParseQueryString: {
     Http::Utility::parseQueryString(input.parse_query_string());
@@ -41,6 +47,42 @@ DEFINE_PROTO_FUZZER(const test::common::http::UtilityTestCase& input) {
     Http::Utility::extractHostPathFromUri(input.extract_host_path_from_uri(), host, path);
     break;
   }
+  case test::common::http::UtilityTestCase::kPercentEncodingString: {
+    Http::Utility::PercentEncoding::encode(input.percent_encoding_string());
+    break;
+  }
+  case test::common::http::UtilityTestCase::kPercentDecodingString: {
+    Http::Utility::PercentEncoding::decode(input.percent_decoding_string());
+    break;
+  }
+  case test::common::http::UtilityTestCase::kParseParameters: {
+    const auto& parse_parameters = input.parse_parameters();
+    Http::Utility::parseParameters(parse_parameters.data(), parse_parameters.start());
+    break;
+  }
+  case test::common::http::UtilityTestCase::kFindQueryString: {
+    Http::HeaderString path(input.find_query_string());
+    Http::Utility::findQueryStringStart(path);
+    break;
+  }
+  case test::common::http::UtilityTestCase::kMakeSetCookieValue: {
+    const auto& cookie_value = input.make_set_cookie_value();
+    std::chrono::seconds max_age(cookie_value.max_age());
+    Http::Utility::makeSetCookieValue(cookie_value.key(), cookie_value.value(), cookie_value.path(),
+                                      max_age, cookie_value.httponly());
+    break;
+  }
+  case test::common::http::UtilityTestCase::kParseAuthorityString: {
+    const auto& authority_string = input.parse_authority_string();
+    Http::Utility::parseAuthority(authority_string);
+    break;
+  }
+  case test::common::http::UtilityTestCase::kInitializeAndValidate: {
+    const auto& options = input.initialize_and_validate();
+    Http2::Utility::initializeAndValidateOptions(options);
+    break;
+  }
+
   default:
     // Nothing to do.
     break;

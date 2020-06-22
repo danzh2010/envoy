@@ -5,12 +5,13 @@
 #include "envoy/config/endpoint/v3/endpoint.pb.h"
 #include "envoy/config/grpc_mux.h"
 #include "envoy/config/subscription.h"
+#include "envoy/config/typed_config.h"
 #include "envoy/service/discovery/v3/discovery.pb.h"
 
 #include "common/config/config_provider_impl.h"
-#include "common/config/resources.h"
 #include "common/protobuf/utility.h"
 
+#include "test/test_common/resources.h"
 #include "test/test_common/utility.h"
 
 #include "gmock/gmock.h"
@@ -95,7 +96,8 @@ public:
   MOCK_METHOD(void, onStreamEstablished, ());
   MOCK_METHOD(void, onEstablishmentFailure, ());
   MOCK_METHOD(void, onDiscoveryResponse,
-              (std::unique_ptr<envoy::service::discovery::v3::DiscoveryResponse> && message));
+              (std::unique_ptr<envoy::service::discovery::v3::DiscoveryResponse> && message,
+               ControlPlaneStats& control_plane_stats));
   MOCK_METHOD(void, onWriteable, ());
 };
 
@@ -117,6 +119,16 @@ public:
               (std::vector<std::unique_ptr<const Protobuf::Message>> && config_protos,
                Server::Configuration::ServerFactoryContext& factory_context,
                const Envoy::Config::ConfigProviderManager::OptionalArg& optarg));
+};
+
+class MockTypedFactory : public TypedFactory {
+public:
+  ~MockTypedFactory() override;
+
+  MOCK_METHOD(ProtobufTypes::MessagePtr, createEmptyConfigProto, ());
+  MOCK_METHOD(std::string, configType, ());
+  MOCK_METHOD(std::string, name, (), (const));
+  MOCK_METHOD(std::string, category, (), (const));
 };
 
 } // namespace Config

@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 
+#include "envoy/common/conn_pool.h"
 #include "envoy/common/pure.h"
 #include "envoy/event/deferred_deletable.h"
 #include "envoy/http/codec.h"
@@ -12,28 +13,8 @@ namespace Envoy {
 namespace Http {
 namespace ConnectionPool {
 
-/**
- * Handle that allows a pending request to be cancelled before it is bound to a connection.
- */
-class Cancellable {
-public:
-  virtual ~Cancellable() = default;
-
-  /**
-   * Cancel the pending request.
-   */
-  virtual void cancel() PURE;
-};
-
-/**
- * Reason that a pool stream could not be obtained.
- */
-enum class PoolFailureReason {
-  // A resource overflowed and policy prevented a new stream from being created.
-  Overflow,
-  // A connection failure took place and the stream could not be bound.
-  ConnectionFailure
-};
+using PoolFailureReason = ::Envoy::ConnectionPool::PoolFailureReason;
+using Cancellable = ::Envoy::ConnectionPool::Cancellable;
 
 /**
  * Pool callbacks invoked in the context of a newStream() call, either synchronously or

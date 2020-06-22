@@ -1,5 +1,3 @@
-licenses(["notice"])  # Apache 2
-
 load(
     "//bazel:envoy_build_system.bzl",
     "envoy_package",
@@ -8,6 +6,8 @@ load(
     "//test/extensions:extensions_build_system.bzl",
     "envoy_extension_cc_test",
 )
+
+licenses(["notice"])  # Apache 2
 
 envoy_package()
 
@@ -37,5 +37,16 @@ envoy_extension_cc_test(
         "//test/mocks/server:server_mocks",
         "//test/mocks/stats:stats_mocks",
         "//test/mocks/upstream:upstream_mocks",
+    ],
+)
+
+envoy_extension_cc_test(
+    name = "hystrix_integration_test",
+    srcs = ["hystrix_integration_test.cc"],
+    extension_name = "envoy.stat_sinks.hystrix",
+    tags = ["fails_on_windows"],
+    deps = [
+        "//source/extensions/stat_sinks/hystrix:config",
+        "//test/integration:http_protocol_integration_lib",
     ],
 )

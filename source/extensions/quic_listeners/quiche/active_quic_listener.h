@@ -3,9 +3,11 @@
 #include "envoy/config/listener/v3/quic_config.pb.h"
 #include "envoy/network/connection_handler.h"
 #include "envoy/network/listener.h"
+#include "envoy/runtime/runtime.h"
 
 #include "common/network/socket_option_impl.h"
 #include "common/protobuf/utility.h"
+#include "common/runtime/runtime_protos.h"
 
 #include "server/connection_handler_impl.h"
 
@@ -25,16 +27,24 @@ public:
 
   ActiveQuicListener(Event::Dispatcher& dispatcher, Network::ConnectionHandler& parent,
                      Network::ListenerConfig& listener_config, const quic::QuicConfig& quic_config,
-                     Network::Socket::OptionsSharedPtr options);
+                     Network::Socket::OptionsSharedPtr options,
+                     const envoy::config::core::v3::RuntimeFeatureFlag& enabled);
 
   ActiveQuicListener(Event::Dispatcher& dispatcher, Network::ConnectionHandler& parent,
                      Network::SocketSharedPtr listen_socket,
                      Network::ListenerConfig& listener_config, const quic::QuicConfig& quic_config,
-                     Network::Socket::OptionsSharedPtr options);
+                     Network::Socket::OptionsSharedPtr options,
+                     const envoy::config::core::v3::RuntimeFeatureFlag& enabled);
+
+  ActiveQuicListener(Event::Dispatcher& dispatcher, Network::ConnectionHandler& parent,
+                     Network::SocketSharedPtr listen_socket,
+                     Network::ListenerConfig& listener_config, const quic::QuicConfig& quic_config,
+                     Network::Socket::OptionsSharedPtr options,
+                     std::unique_ptr<quic::ProofSource> proof_source,
+                     const envoy::config::core::v3::RuntimeFeatureFlag& enabled);
 
   ~ActiveQuicListener() override;
 
-  // TODO(#7465): Make this a callback.
   void onListenerShutdown();
 
   // Network::UdpListenerCallbacks
@@ -47,7 +57,9 @@ public:
 
   // ActiveListenerImplBase
   Network::Listener* listener() override { return udp_listener_.get(); }
-  void destroy() override { udp_listener_.reset(); }
+  void pauseListening() override;
+  void resumeListening() override;
+  void shutdownListener() override;
 
 private:
   friend class ActiveQuicListenerPeer;
@@ -59,6 +71,7 @@ private:
   quic::QuicVersionManager version_manager_;
   std::unique_ptr<EnvoyQuicDispatcher> quic_dispatcher_;
   Network::Socket& listen_socket_;
+  Runtime::FeatureFlag enabled_;
 };
 
 using ActiveQuicListenerPtr = std::unique_ptr<ActiveQuicListener>;
@@ -82,6 +95,7 @@ private:
   quic::QuicConfig quic_config_;
   const uint32_t concurrency_;
   absl::once_flag install_bpf_once_;
+  envoy::config::core::v3::RuntimeFeatureFlag enabled_;
 };
 
 } // namespace Quic

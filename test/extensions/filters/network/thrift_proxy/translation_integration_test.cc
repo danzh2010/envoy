@@ -23,8 +23,8 @@ class ThriftTranslationIntegrationTest
           std::tuple<TransportType, ProtocolType, TransportType, ProtocolType>>,
       public BaseThriftIntegrationTest {
 public:
-  static void SetUpTestSuite() {
-    thrift_config_ = ConfigHelper::BASE_CONFIG + R"EOF(
+  static void SetUpTestSuite() { // NOLINT(readability-identifier-naming)
+    thrift_config_ = absl::StrCat(ConfigHelper::baseConfig(), R"EOF(
     filter_chains:
       filters:
         - name: thrift
@@ -38,7 +38,7 @@ public:
                     method_name: "add"
                   route:
                     cluster: "cluster_0"
-      )EOF";
+      )EOF");
   }
 
   void initialize() override {
@@ -80,11 +80,6 @@ public:
     preparePayloads(upstream_opts, upstream_request_bytes_, upstream_response_bytes_);
 
     BaseThriftIntegrationTest::initialize();
-  }
-
-  void TearDown() override {
-    test_server_.reset();
-    fake_upstreams_.clear();
   }
 
   Buffer::OwnedImpl downstream_request_bytes_;

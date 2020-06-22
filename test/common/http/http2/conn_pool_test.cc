@@ -78,7 +78,7 @@ public:
     test_client.connection_ = new NiceMock<Network::MockClientConnection>();
     test_client.codec_ = new NiceMock<Http::MockClientConnection>();
     test_client.connect_timer_ = new NiceMock<Event::MockTimer>(&dispatcher_);
-    test_client.client_dispatcher_ = api_->allocateDispatcher();
+    test_client.client_dispatcher_ = api_->allocateDispatcher("test_thread");
     EXPECT_CALL(dispatcher_, createClientConnection_(_, _, _, _))
         .WillOnce(Return(test_client.connection_));
     auto cluster = std::make_shared<NiceMock<Upstream::MockClusterInfo>>();
@@ -106,7 +106,7 @@ public:
 
   // Resets the connection belonging to the provided index, asserting that the
   // provided request receives onPoolFailure.
-  void expectClientReset(size_t index, ActiveTestRequest& r);
+  void expectClientReset(size_t index, ActiveTestRequest& r, bool local_failure);
   // Asserts that the provided requests receives onPoolFailure.
   void expectStreamReset(ActiveTestRequest& r);
 
@@ -171,10 +171,17 @@ void Http2ConnPoolImplTest::expectStreamConnect(size_t index, ActiveTestRequest&
   EXPECT_CALL(r.callbacks_.pool_ready_, ready());
 }
 
-void Http2ConnPoolImplTest::expectClientReset(size_t index, ActiveTestRequest& r) {
+void Http2ConnPoolImplTest::expectClientReset(size_t index, ActiveTestRequest& r,
+                                              bool local_failure) {
   expectStreamReset(r);
   EXPECT_CALL(*test_clients_[0].connect_timer_, disableTimer());
-  test_clients_[index].connection_->raiseEvent(Network::ConnectionEvent::RemoteClose);
+  if (local_failure) {
+    test_clients_[index].connection_->raiseEvent(Network::ConnectionEvent::LocalClose);
+    EXPECT_EQ(r.callbacks_.reason_, ConnectionPool::PoolFailureReason::LocalConnectionFailure);
+  } else {
+    test_clients_[index].connection_->raiseEvent(Network::ConnectionEvent::RemoteClose);
+    EXPECT_EQ(r.callbacks_.reason_, ConnectionPool::PoolFailureReason::RemoteConnectionFailure);
+  }
 }
 
 void Http2ConnPoolImplTest::expectStreamReset(ActiveTestRequest& r) {
@@ -248,7 +255,7 @@ TEST_F(Http2ConnPoolImplTest, DrainConnectionReadyWithRequest) {
  * complete.
  */
 TEST_F(Http2ConnPoolImplTest, DrainConnectionBusy) {
-  cluster_->http2_settings_.max_concurrent_streams_ = 1;
+  cluster_->http2_options_.mutable_max_concurrent_streams()->set_value(1);
   InSequence s;
 
   expectClientCreate();
@@ -281,9 +288,150 @@ TEST_F(Http2ConnPoolImplTest, DrainConnectionConnecting) {
   pool_.drainConnections();
 
   // Cancel the pending request, and then the connection can be closed.
-  r.handle_->cancel();
+  r.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::Default);
   EXPECT_CALL(*this, onClientDestroy());
   pool_.drainConnections();
+}
+
+/**
+ * Verify that on CloseExcess, the connection is destroyed immediately.
+ */
+TEST_F(Http2ConnPoolImplTest, CloseExcess) {
+  InSequence s;
+
+  expectClientCreate();
+  ActiveTestRequest r(*this, 0, false);
+
+  // Pending request prevents the connection from being drained
+  pool_.drainConnections();
+
+  EXPECT_CALL(*this, onClientDestroy());
+  r.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+}
+
+/**
+ * Verify that on CloseExcess connections are destroyed when they can be.
+ */
+TEST_F(Http2ConnPoolImplTest, CloseExcessTwo) {
+  cluster_->http2_options_.mutable_max_concurrent_streams()->set_value(1);
+  InSequence s;
+
+  expectClientCreate();
+  ActiveTestRequest r1(*this, 0, false);
+
+  expectClientCreate();
+  ActiveTestRequest r2(*this, 0, false);
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r1.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r2.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+}
+
+/**
+ * Verify that on CloseExcess, the connections are destroyed iff they are actually excess.
+ */
+TEST_F(Http2ConnPoolImplTest, CloseExcessMultipleRequests) {
+  cluster_->http2_options_.mutable_max_concurrent_streams()->set_value(3);
+  InSequence s;
+
+  // With 3 requests per connection, the first request will result in a client
+  // connection, and the next two will be queued for that connection.
+  expectClientCreate();
+  ActiveTestRequest r1(*this, 0, false);
+  ActiveTestRequest r2(*this, 0, false);
+  ActiveTestRequest r3(*this, 0, false);
+
+  // The fourth request will kick off a second connection, and the fifth will plan to share it.
+  expectClientCreate();
+  ActiveTestRequest r4(*this, 0, false);
+  ActiveTestRequest r5(*this, 0, false);
+
+  // The section below cancels the active requests in fairly random order, to
+  // ensure there's no association between the requests and the clients created
+  // for them.
+
+  // The first cancel will not destroy any clients, as there are still four pending
+  // requests and they can not all share the first connection.
+  {
+    EXPECT_CALL(*this, onClientDestroy()).Times(0);
+    r5.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+  // The second cancel will destroy one client, as there will be three pending requests
+  // remaining, and they only need one connection.
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r1.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+
+  // The next two calls will not destroy the final client, as there are two other
+  // pending requests waiting on it.
+  {
+    EXPECT_CALL(*this, onClientDestroy()).Times(0);
+    r2.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+    r4.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+  // Finally with the last request gone, the final client is destroyed.
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r3.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+}
+
+TEST_F(Http2ConnPoolImplTest, CloseExcessMixedMultiplexing) {
+  InSequence s;
+
+  // Create clients with in-order capacity:
+  // 3  2  6
+  // Connection capacity is min(max requests per connection, max concurrent streams).
+  // Use maxRequestsPerConnection here since max requests is tested above.
+  EXPECT_CALL(*cluster_, maxRequestsPerConnection).WillOnce(Return(3));
+  expectClientCreate();
+  ActiveTestRequest r1(*this, 0, false);
+  ActiveTestRequest r2(*this, 0, false);
+  ActiveTestRequest r3(*this, 0, false);
+
+  EXPECT_CALL(*cluster_, maxRequestsPerConnection).WillOnce(Return(2));
+  expectClientCreate();
+  ActiveTestRequest r4(*this, 0, false);
+  ActiveTestRequest r5(*this, 0, false);
+
+  EXPECT_CALL(*cluster_, maxRequestsPerConnection).WillOnce(Return(6));
+  expectClientCreate();
+  ActiveTestRequest r6(*this, 0, false);
+
+  // 6 requests, capacity [3, 2, 6] - the first cancel should tear down the client with [3]
+  // since we destroy oldest first and [3, 2] can handle the remaining 5 requests.
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r1.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+
+  // 5 requests, capacity [3, 2] - no teardown
+  {
+    EXPECT_CALL(*this, onClientDestroy()).Times(0);
+    r2.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+  // 4 requests, capacity [3, 2] - canceling one destroys the client with [2]
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r3.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+
+  // 3 requests, capacity [3]. Tear down the last channel when all 3 are canceled.
+  {
+    EXPECT_CALL(*this, onClientDestroy()).Times(0);
+    r4.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+    r5.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
+  {
+    EXPECT_CALL(*this, onClientDestroy());
+    r6.handle_->cancel(Envoy::ConnectionPool::CancelPolicy::CloseExcess);
+  }
 }
 
 /**
@@ -331,7 +479,7 @@ TEST_F(Http2ConnPoolImplTest, DrainConnections) {
 // concurrent requests and causes additional connections to be created.
 TEST_F(Http2ConnPoolImplTest, MaxConcurrentRequestsPerStream) {
   cluster_->resetResourceManager(2, 1024, 1024, 1, 1);
-  cluster_->http2_settings_.max_concurrent_streams_ = 1;
+  cluster_->http2_options_.mutable_max_concurrent_streams()->set_value(1);
 
   InSequence s;
 
@@ -462,7 +610,7 @@ TEST_F(Http2ConnPoolImplTest, PendingRequestsNumberConnectingTotalRequestsPerCon
 // Verifies that the correct number of CONNECTING connections are created for
 // the pending requests, when the concurrent requests per connection is limited
 TEST_F(Http2ConnPoolImplTest, PendingRequestsNumberConnectingConcurrentRequestsPerConnection) {
-  cluster_->http2_settings_.max_concurrent_streams_ = 2;
+  cluster_->http2_options_.mutable_max_concurrent_streams()->set_value(2);
   InSequence s;
 
   // Create three requests. The 3rd should create a 2nd connection due to the limit
@@ -514,7 +662,7 @@ TEST_F(Http2ConnPoolImplTest, PendingRequestsFailure) {
   // Note that these occur in reverse order due to the order we purge pending requests in.
   expectStreamReset(r3);
   expectStreamReset(r2);
-  expectClientReset(0, r1);
+  expectClientReset(0, r1, false);
 
   expectClientCreate();
   // Since we have no active connection, subsequence requests will queue until
@@ -529,6 +677,26 @@ TEST_F(Http2ConnPoolImplTest, PendingRequestsFailure) {
 
   EXPECT_EQ(2U, cluster_->stats_.upstream_cx_destroy_.value());
   EXPECT_EQ(2U, cluster_->stats_.upstream_cx_destroy_remote_.value());
+}
+
+// Verifies resets due to local connection closes are tracked correctly.
+TEST_F(Http2ConnPoolImplTest, LocalFailure) {
+  InSequence s;
+  cluster_->max_requests_per_connection_ = 10;
+
+  // Create three requests. These should be queued up.
+  expectClientCreate();
+  ActiveTestRequest r1(*this, 0, false);
+  ActiveTestRequest r2(*this, 0, false);
+  ActiveTestRequest r3(*this, 0, false);
+
+  // The connection now becomes ready. This should cause all the queued requests to be sent.
+  // Note that these occur in reverse order due to the order we purge pending requests in.
+  expectStreamReset(r3);
+  expectStreamReset(r2);
+  expectClientReset(0, r1, true);
+
+  EXPECT_CALL(*this, onClientDestroy());
 }
 
 // Verifies that requests are queued up in the conn pool and respect max request circuit breaking
@@ -877,6 +1045,7 @@ TEST_F(Http2ConnPoolImplTest, ConnectTimeout) {
   ActiveTestRequest r1(*this, 0, false);
   EXPECT_CALL(r1.callbacks_.pool_failure_, ready());
   test_clients_[0].connect_timer_->invokeCallback();
+  EXPECT_EQ(r1.callbacks_.reason_, ConnectionPool::PoolFailureReason::Timeout);
 
   EXPECT_CALL(*this, onClientDestroy());
   dispatcher_.clearDeferredDeleteList();

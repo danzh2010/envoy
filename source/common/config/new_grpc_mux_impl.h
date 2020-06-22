@@ -41,7 +41,8 @@ public:
   void resume(const std::string& type_url) override;
   bool paused(const std::string& type_url) const override;
   void onDiscoveryResponse(
-      std::unique_ptr<envoy::service::discovery::v3::DeltaDiscoveryResponse>&& message) override;
+      std::unique_ptr<envoy::service::discovery::v3::DeltaDiscoveryResponse>&& message,
+      ControlPlaneStats& control_plane_stats) override;
 
   void onStreamEstablished() override;
 
@@ -76,7 +77,7 @@ private:
     WatchImpl(const std::string& type_url, Watch* watch, NewGrpcMuxImpl& parent)
         : type_url_(type_url), watch_(watch), parent_(parent) {}
 
-    ~WatchImpl() { remove(); }
+    ~WatchImpl() override { remove(); }
 
     void remove() {
       if (watch_) {

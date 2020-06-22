@@ -30,7 +30,7 @@ protected:
                    Event::Dispatcher& dispatcher,
                    const Network::ConnectionSocket::OptionsSharedPtr& options,
                    const Network::TransportSocketOptionsSharedPtr& transport_socket_options);
-  virtual ~ConnPoolImplBase();
+  ~ConnPoolImplBase() override;
 
   // Closes and destroys all connections. This must be called in the destructor of
   // derived classes because the derived ActiveClient will downcast parent_ to a more
@@ -46,7 +46,7 @@ protected:
   public:
     ActiveClient(ConnPoolImplBase& parent, uint64_t lifetime_request_limit,
                  uint64_t concurrent_request_limit);
-    virtual ~ActiveClient();
+    ~ActiveClient() override;
 
     void releaseResources();
 
@@ -89,6 +89,7 @@ protected:
     Stats::TimespanPtr conn_length_;
     Event::TimerPtr connect_timer_;
     bool resources_released_{false};
+    bool timed_out_{false};
   };
 
   using ActiveClientPtr = std::unique_ptr<ActiveClient>;
@@ -99,7 +100,9 @@ protected:
     ~PendingRequest() override;
 
     // ConnectionPool::Cancellable
-    void cancel() override { parent_.onPendingRequestCancel(*this); }
+    void cancel(Envoy::ConnectionPool::CancelPolicy policy) override {
+      parent_.onPendingRequestCancel(*this, policy);
+    }
 
     ConnPoolImplBase& parent_;
     ResponseDecoder& decoder_;
@@ -122,11 +125,12 @@ protected:
                                                  ConnectionPool::Callbacks& callbacks);
   // Removes the PendingRequest from the list of requests. Called when the PendingRequest is
   // cancelled, e.g. when the stream is reset before a connection has been established.
-  void onPendingRequestCancel(PendingRequest& request);
+  void onPendingRequestCancel(PendingRequest& request, Envoy::ConnectionPool::CancelPolicy policy);
 
   // Fails all pending requests, calling onPoolFailure on the associated callbacks.
   void purgePendingRequests(const Upstream::HostDescriptionConstSharedPtr& host_description,
-                            absl::string_view failure_reason);
+                            absl::string_view failure_reason,
+                            ConnectionPool::PoolFailureReason pool_failure_reason);
 
   // Closes any idle connections.
   void closeIdleConnections();
@@ -167,9 +171,11 @@ protected:
   // All entries are in state READY.
   std::list<ActiveClientPtr> ready_clients_;
 
-  // Clients that are not ready to handle additional requests.
-  // Entries are in possible states CONNECTING, BUSY, or DRAINING.
+  // Clients that are not ready to handle additional requests due to being BUSY or DRAINING.
   std::list<ActiveClientPtr> busy_clients_;
+
+  // Clients that are not ready to handle additional requests because they are CONNECTING.
+  std::list<ActiveClientPtr> connecting_clients_;
 
   // The number of requests currently attached to clients.
   uint64_t num_active_requests_{0};

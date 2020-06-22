@@ -16,10 +16,14 @@ public:
   const std::string Buffer = "envoy.filters.http.buffer";
   // Cache filter
   const std::string Cache = "envoy.filters.http.cache";
+  // Compressor filter
+  const std::string Compressor = "envoy.filters.http.compressor";
   // CORS filter
   const std::string Cors = "envoy.filters.http.cors";
   // CSRF filter
   const std::string Csrf = "envoy.filters.http.csrf";
+  // Decompressor filter
+  const std::string Decompressor = "envoy.filters.http.decompressor";
   // Dynamo filter
   const std::string Dynamo = "envoy.filters.http.dynamo";
   // Fault filter
@@ -68,6 +72,8 @@ public:
   const std::string DynamicForwardProxy = "envoy.filters.http.dynamic_forward_proxy";
   // AWS request signing filter
   const std::string AwsRequestSigning = "envoy.filters.http.aws_request_signing";
+  // AWS Lambda filter
+  const std::string AwsLambda = "envoy.filters.http.aws_lambda";
 };
 
 using HttpFilterNames = ConstSingleton<HttpFilterNameValues>;

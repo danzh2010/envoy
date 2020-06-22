@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "envoy/access_log/access_log.h"
 #include "envoy/api/io_error.h"
 #include "envoy/common/exception.h"
 #include "envoy/config/core/v3/base.pb.h"
@@ -36,7 +37,7 @@ public:
   /**
    * @return the type of the socket getListenSocket() returns.
    */
-  virtual Address::SocketType socketType() const PURE;
+  virtual Socket::Type socketType() const PURE;
 
   /**
    * @return the listening address of the socket getListenSocket() returns. Before getListenSocket()
@@ -142,6 +143,11 @@ public:
    *         though the implementation may be a NOP balancer.
    */
   virtual ConnectionBalancer& connectionBalancer() PURE;
+
+  /**
+   * @return std::vector<AccessLog::InstanceSharedPtr> access logs emitted by the listener.
+   */
+  virtual const std::vector<AccessLog::InstanceSharedPtr>& accessLogs() const PURE;
 };
 
 /**

@@ -13,10 +13,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import pathlib
 import paths
 
 # Where does Buildozer live?
 BUILDOZER_PATH = paths.getBuildozer()
+
+# Where does Buildifier live?
+BUILDIFIER_PATH = paths.getBuildifier()
 
 # Canonical Envoy license.
 LICENSE_STRING = 'licenses(["notice"])  # Apache 2\n\n'
@@ -33,7 +37,7 @@ PACKAGE_LOAD_BLOCK_REGEX = re.compile('("envoy_package".*?\)\n)', re.DOTALL)
 # Match Buildozer 'print' output. Example of Buildozer print output:
 # cc_library json_transcoder_filter_lib [json_transcoder_filter.cc] (missing) (missing)
 BUILDOZER_PRINT_REGEX = re.compile(
-    '\s*([\w_]+)\s*([\w_]+)\s*[(\[](.*?)[)\]]\s* [(\[](.*?)[)\]]\s*[(\[](.*?)[)\]]')
+    '\s*([\w_]+)\s+([\w_]+)\s+[(\[](.*?)[)\]]\s+[(\[](.*?)[)\]]\s+[(\[](.*?)[)\]]')
 
 # Match API header include in Envoy source file?
 API_INCLUDE_REGEX = re.compile('#include "(envoy/.*)/[^/]+\.pb\.(validate\.)?h"')
@@ -88,24 +92,25 @@ def FixPackageAndLicense(contents):
   return contents
 
 
-# Remove trailing blank lines, unnecessary double blank lines.
-def FixEmptyLines(contents):
-  return re.sub('\n\s*$', '\n', re.sub('\n\n\n', '\n\n', contents))
-
-
-# Misc. Buildozer cleanups.
-def FixBuildozerCleanups(contents):
-  return RunBuildozer([('fix unusedLoads', '__pkg__')], contents)
+# Run Buildifier commands on a string with lint mode.
+def BuildifierLint(contents):
+  r = subprocess.run([BUILDIFIER_PATH, '-lint=fix', '-mode=fix', '-type=build'],
+                     input=contents.encode(),
+                     stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE)
+  if r.returncode != 0:
+    raise EnvoyBuildFixerError('buildozer execution failed: %s' % r)
+  return r.stdout.decode('utf-8')
 
 
 # Find all the API headers in a C++ source file.
 def FindApiHeaders(source_path):
   api_hdrs = set([])
-  with open(source_path, 'rb') as f:
-    for line in f:
-      match = re.match(API_INCLUDE_REGEX, line.decode('utf-8'))
-      if match:
-        api_hdrs.add(match.group(1))
+  contents = pathlib.Path(source_path).read_text(encoding='utf8')
+  for line in contents.split('\n'):
+    match = re.match(API_INCLUDE_REGEX, line)
+    if match:
+      api_hdrs.add(match.group(1))
   return api_hdrs
 
 
@@ -169,9 +174,8 @@ def FixBuild(path):
     contents = f.read()
   xforms = [
       FixPackageAndLicense,
-      FixEmptyLines,
       functools.partial(FixApiDeps, path),
-      FixBuildozerCleanups,
+      BuildifierLint,
   ]
   for xform in xforms:
     contents = xform(contents)

@@ -26,6 +26,8 @@
 #include "common/grpc/codec.h"
 #include "common/grpc/common.h"
 #include "common/http/exception.h"
+#include "common/http/http1/codec_impl.h"
+#include "common/http/http2/codec_impl.h"
 #include "common/network/connection_balancer_impl.h"
 #include "common/network/filter_impl.h"
 #include "common/network/listen_socket_impl.h"
@@ -38,7 +40,9 @@
 #include "test/test_common/utility.h"
 
 namespace Envoy {
+
 class FakeHttpConnection;
+class FakeUpstream;
 
 /**
  * Provides a fake HTTP stream for integration testing.
@@ -64,10 +68,14 @@ public:
   void encodeTrailers(const Http::HeaderMap& trailers);
   void encodeResetStream();
   void encodeMetadata(const Http::MetadataMapVector& metadata_map_vector);
+  void readDisable(bool disable);
   const Http::RequestHeaderMap& headers() { return *headers_; }
   void setAddServedByHeader(bool add_header) { add_served_by_header_ = add_header; }
   const Http::RequestTrailerMapPtr& trailers() { return trailers_; }
   bool receivedData() { return received_data_; }
+  Http::Http1StreamEncoderOptionsOptRef http1StreamEncoderOptions() {
+    return encoder_.http1StreamEncoderOptions();
+  }
 
   ABSL_MUST_USE_RESULT
   testing::AssertionResult
@@ -416,9 +424,11 @@ class FakeHttpConnection : public Http::ServerConnectionCallbacks, public FakeCo
 public:
   enum class Type { HTTP1, HTTP2 };
 
-  FakeHttpConnection(SharedConnectionWrapper& shared_connection, Stats::Store& store, Type type,
-                     Event::TestTimeSystem& time_system, uint32_t max_request_headers_kb,
-                     uint32_t max_request_headers_count);
+  FakeHttpConnection(FakeUpstream& fake_upstream, SharedConnectionWrapper& shared_connection,
+                     Type type, Event::TestTimeSystem& time_system, uint32_t max_request_headers_kb,
+                     uint32_t max_request_headers_count,
+                     envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+                         headers_with_underscores_action);
 
   // By default waitForNewStream assumes the next event is a new stream and
   // returns AssertionFailure if an unexpected event occurs. If a caller truly
@@ -440,10 +450,10 @@ private:
 
     // Network::ReadFilter
     Network::FilterStatus onData(Buffer::Instance& data, bool) override {
-      try {
-        parent_.codec_->dispatch(data);
-      } catch (const Http::CodecProtocolException& e) {
-        ENVOY_LOG(debug, "FakeUpstream dispatch error: {}", e.what());
+      Http::Status status = parent_.codec_->dispatch(data);
+
+      if (Http::isCodecProtocolError(status)) {
+        ENVOY_LOG(debug, "FakeUpstream dispatch error: {}", status.message());
         // We don't do a full stream shutdown like HCM, but just shutdown the
         // connection for now.
         read_filter_callbacks_->connection().close(
@@ -559,11 +569,13 @@ public:
 
   // Returns the new connection via the connection argument.
   ABSL_MUST_USE_RESULT
-  testing::AssertionResult
-  waitForHttpConnection(Event::Dispatcher& client_dispatcher, FakeHttpConnectionPtr& connection,
-                        std::chrono::milliseconds timeout = TestUtility::DefaultTimeout,
-                        uint32_t max_request_headers_kb = Http::DEFAULT_MAX_REQUEST_HEADERS_KB,
-                        uint32_t max_request_headers_count = Http::DEFAULT_MAX_HEADERS_COUNT);
+  testing::AssertionResult waitForHttpConnection(
+      Event::Dispatcher& client_dispatcher, FakeHttpConnectionPtr& connection,
+      std::chrono::milliseconds timeout = TestUtility::DefaultTimeout,
+      uint32_t max_request_headers_kb = Http::DEFAULT_MAX_REQUEST_HEADERS_KB,
+      uint32_t max_request_headers_count = Http::DEFAULT_MAX_HEADERS_COUNT,
+      envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+          headers_with_underscores_action = envoy::config::core::v3::HttpProtocolOptions::ALLOW);
 
   ABSL_MUST_USE_RESULT
   testing::AssertionResult
@@ -609,6 +621,14 @@ public:
   // Stops the dispatcher loop and joins the listening thread.
   void cleanUp();
 
+  Http::Http1::CodecStats& http1CodecStats() {
+    return Http::Http1::CodecStats::atomicGet(http1_codec_stats_, stats_store_);
+  }
+
+  Http::Http2::CodecStats& http2CodecStats() {
+    return Http::Http2::CodecStats::atomicGet(http2_codec_stats_, stats_store_);
+  }
+
 protected:
   Stats::IsolatedStoreImpl stats_store_;
   const FakeHttpConnection::Type http_type_;
@@ -623,7 +643,7 @@ private:
     FakeListenSocketFactory(Network::SocketSharedPtr socket) : socket_(socket) {}
 
     // Network::ListenSocketFactory
-    Network::Address::SocketType socketType() const override { return socket_->socketType(); }
+    Network::Socket::Type socketType() const override { return socket_->socketType(); }
 
     const Network::Address::InstanceConstSharedPtr& localAddress() const override {
       return socket_->localAddress();
@@ -665,9 +685,7 @@ private:
     bool bindToPort() override { return true; }
     bool handOffRestoredDestinationConnections() const override { return false; }
     uint32_t perConnectionBufferLimitBytes() const override { return 0; }
-    std::chrono::milliseconds listenerFiltersTimeout() const override {
-      return std::chrono::milliseconds();
-    }
+    std::chrono::milliseconds listenerFiltersTimeout() const override { return {}; }
     bool continueOnListenerFiltersTimeout() const override { return false; }
     Stats::Scope& listenerScope() override { return parent_.stats_store_; }
     uint64_t listenerTag() const override { return 0; }
@@ -679,11 +697,15 @@ private:
     envoy::config::core::v3::TrafficDirection direction() const override {
       return envoy::config::core::v3::UNSPECIFIED;
     }
+    const std::vector<AccessLog::InstanceSharedPtr>& accessLogs() const override {
+      return empty_access_logs_;
+    }
 
     FakeUpstream& parent_;
     const std::string name_;
     Network::NopConnectionBalancerImpl connection_balancer_;
     const Network::ActiveUdpListenerFactoryPtr udp_listener_factory_;
+    const std::vector<AccessLog::InstanceSharedPtr> empty_access_logs_;
   };
 
   void threadRoutine();
@@ -713,6 +735,8 @@ private:
   FakeListener listener_;
   const Network::FilterChainSharedPtr filter_chain_;
   std::list<Network::UdpRecvData> received_datagrams_ ABSL_GUARDED_BY(lock_);
+  Http::Http1::CodecStats::AtomicPtr http1_codec_stats_;
+  Http::Http2::CodecStats::AtomicPtr http2_codec_stats_;
 };
 
 using FakeUpstreamPtr = std::unique_ptr<FakeUpstream>;

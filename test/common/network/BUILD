@@ -1,12 +1,14 @@
-licenses(["notice"])  # Apache 2
-
 load(
     "//bazel:envoy_build_system.bzl",
+    "envoy_benchmark_test",
+    "envoy_cc_benchmark_binary",
     "envoy_cc_test",
     "envoy_cc_test_binary",
     "envoy_cc_test_library",
     "envoy_package",
 )
+
+licenses(["notice"])  # Apache 2
 
 envoy_package()
 
@@ -42,7 +44,7 @@ envoy_cc_test(
     ],
 )
 
-envoy_cc_test_binary(
+envoy_cc_benchmark_binary(
     name = "address_impl_speed_test",
     srcs = ["address_impl_speed_test.cc"],
     external_deps = [
@@ -51,6 +53,11 @@ envoy_cc_test_binary(
     deps = [
         "//source/common/network:address_lib",
     ],
+)
+
+envoy_benchmark_test(
+    name = "address_impl_speed_test_benchmark_test",
+    benchmark_binary = "address_impl_speed_test",
 )
 
 envoy_cc_test(
@@ -66,6 +73,8 @@ envoy_cc_test(
 envoy_cc_test(
     name = "connection_impl_test",
     srcs = ["connection_impl_test.cc"],
+    # Times out on Windows
+    tags = ["fails_on_windows"],
     deps = [
         "//source/common/buffer:buffer_lib",
         "//source/common/common:empty_string",
@@ -91,6 +100,7 @@ envoy_cc_test(
 envoy_cc_test(
     name = "dns_impl_test",
     srcs = ["dns_impl_test.cc"],
+    tags = ["fails_on_windows"],
     deps = [
         "//include/envoy/event:dispatcher_interface",
         "//include/envoy/network:address_interface",
@@ -103,6 +113,7 @@ envoy_cc_test(
         "//source/common/network:filter_lib",
         "//source/common/network:listen_socket_lib",
         "//source/common/stats:stats_lib",
+        "//source/common/stream_info:stream_info_lib",
         "//test/mocks/network:network_mocks",
         "//test/test_common:environment_lib",
         "//test/test_common:network_utility_lib",
@@ -169,6 +180,8 @@ envoy_cc_test(
 envoy_cc_test(
     name = "listener_impl_test",
     srcs = ["listener_impl_test.cc"],
+    # Times out on Windows
+    tags = ["fails_on_windows"],
     deps = [
         "//source/common/event:dispatcher_lib",
         "//source/common/network:address_lib",
@@ -188,6 +201,7 @@ envoy_cc_test(
 envoy_cc_test(
     name = "udp_listener_impl_test",
     srcs = ["udp_listener_impl_test.cc"],
+    tags = ["fails_on_windows"],
     deps = [
         "//source/common/event:dispatcher_lib",
         "//source/common/network:address_lib",
@@ -264,6 +278,7 @@ envoy_cc_test(
 envoy_cc_test(
     name = "addr_family_aware_socket_option_impl_test",
     srcs = ["addr_family_aware_socket_option_impl_test.cc"],
+    tags = ["fails_on_windows"],
     deps = [
         ":socket_option_test",
         "//source/common/network:addr_family_aware_socket_option_lib",
@@ -310,5 +325,15 @@ envoy_cc_test(
     deps = [
         "//source/common/network:transport_socket_options_lib",
         "//source/common/stream_info:filter_state_lib",
+    ],
+)
+
+envoy_cc_test(
+    name = "filter_matcher_test",
+    srcs = ["filter_matcher_test.cc"],
+    deps = [
+        "//source/common/network:address_lib",
+        "//source/common/network:filter_matcher_lib",
+        "//test/mocks/network:network_mocks",
     ],
 )

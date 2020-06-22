@@ -11,6 +11,7 @@
 #include "test/extensions/filters/common/ext_authz/mocks.h"
 #include "test/extensions/filters/common/ext_authz/test_common.h"
 #include "test/mocks/grpc/mocks.h"
+#include "test/mocks/stream_info/mocks.h"
 #include "test/mocks/upstream/mocks.h"
 
 #include "gmock/gmock.h"
@@ -64,6 +65,7 @@ public:
   MockRequestCallbacks request_callbacks_;
   Tracing::MockSpan span_;
   bool use_alpha_{};
+  NiceMock<StreamInfo::MockStreamInfo> stream_info_;
 };
 
 INSTANTIATE_TEST_SUITE_P(Parameterized, ExtAuthzGrpcClientTest, Values(true, false));
@@ -80,9 +82,9 @@ TEST_P(ExtAuthzGrpcClientTest, AuthorizationOk) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
-  Http::RequestHeaderMapImpl headers;
+  Http::TestRequestHeaderMapImpl headers;
   client_->onCreateInitialMetadata(headers);
 
   EXPECT_CALL(span_, setTag(Eq("ext_authz_status"), Eq("ext_authz_ok")));
@@ -104,9 +106,9 @@ TEST_P(ExtAuthzGrpcClientTest, AuthorizationOkWithAllAtributes) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
-  Http::RequestHeaderMapImpl headers;
+  Http::TestRequestHeaderMapImpl headers;
   client_->onCreateInitialMetadata(headers);
 
   EXPECT_CALL(span_, setTag(Eq("ext_authz_status"), Eq("ext_authz_ok")));
@@ -127,9 +129,9 @@ TEST_P(ExtAuthzGrpcClientTest, AuthorizationDenied) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
-  Http::RequestHeaderMapImpl headers;
+  Http::TestRequestHeaderMapImpl headers;
   client_->onCreateInitialMetadata(headers);
   EXPECT_EQ(nullptr, headers.RequestId());
   EXPECT_CALL(span_, setTag(Eq("ext_authz_status"), Eq("ext_authz_unauthorized")));
@@ -151,9 +153,9 @@ TEST_P(ExtAuthzGrpcClientTest, AuthorizationDeniedGrpcUnknownStatus) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
-  Http::RequestHeaderMapImpl headers;
+  Http::TestRequestHeaderMapImpl headers;
   client_->onCreateInitialMetadata(headers);
   EXPECT_EQ(nullptr, headers.RequestId());
   EXPECT_CALL(span_, setTag(Eq("ext_authz_status"), Eq("ext_authz_unauthorized")));
@@ -178,9 +180,9 @@ TEST_P(ExtAuthzGrpcClientTest, AuthorizationDeniedWithAllAttributes) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
-  Http::RequestHeaderMapImpl headers;
+  Http::TestRequestHeaderMapImpl headers;
   client_->onCreateInitialMetadata(headers);
   EXPECT_EQ(nullptr, headers.RequestId());
   EXPECT_CALL(span_, setTag(Eq("ext_authz_status"), Eq("ext_authz_unauthorized")));
@@ -196,7 +198,7 @@ TEST_P(ExtAuthzGrpcClientTest, UnknownError) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
   EXPECT_CALL(request_callbacks_,
               onComplete_(WhenDynamicCastTo<ResponsePtr&>(AuthzErrorResponse(CheckStatus::Error))));
@@ -209,7 +211,7 @@ TEST_P(ExtAuthzGrpcClientTest, CancelledAuthorizationRequest) {
 
   envoy::service::auth::v3::CheckRequest request;
   EXPECT_CALL(*async_client_, sendRaw(_, _, _, _, _, _)).WillOnce(Return(&async_request_));
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
   EXPECT_CALL(async_request_, cancel());
   client_->cancel();
@@ -221,7 +223,7 @@ TEST_P(ExtAuthzGrpcClientTest, AuthorizationRequestTimeout) {
 
   envoy::service::auth::v3::CheckRequest request;
   expectCallSend(request);
-  client_->check(request_callbacks_, request, Tracing::NullSpan::instance());
+  client_->check(request_callbacks_, request, Tracing::NullSpan::instance(), stream_info_);
 
   EXPECT_CALL(request_callbacks_,
               onComplete_(WhenDynamicCastTo<ResponsePtr&>(AuthzErrorResponse(CheckStatus::Error))));

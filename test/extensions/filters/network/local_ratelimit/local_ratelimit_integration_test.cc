@@ -8,12 +8,7 @@ class LocalRateLimitIntegrationTest : public Event::TestUsingSimulatedTime,
                                       public BaseIntegrationTest {
 public:
   LocalRateLimitIntegrationTest()
-      : BaseIntegrationTest(GetParam(), ConfigHelper::TCP_PROXY_CONFIG) {}
-
-  ~LocalRateLimitIntegrationTest() override {
-    test_server_.reset();
-    fake_upstreams_.clear();
-  }
+      : BaseIntegrationTest(GetParam(), ConfigHelper::tcpProxyConfig()) {}
 
   void setup(const std::string& filter_yaml) {
     config_helper_.addNetworkFilter(filter_yaml);

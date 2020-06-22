@@ -51,7 +51,6 @@ public:
 
   const LowerCaseString Accept{"accept"};
   const LowerCaseString AcceptEncoding{"accept-encoding"};
-  const LowerCaseString AccessControlRequestHeaders{"access-control-request-headers"};
   const LowerCaseString AccessControlRequestMethod{"access-control-request-method"};
   const LowerCaseString AccessControlAllowOrigin{"access-control-allow-origin"};
   const LowerCaseString AccessControlAllowHeaders{"access-control-allow-headers"};
@@ -91,6 +90,7 @@ public:
   const LowerCaseString EnvoyMaxRetries{absl::StrCat(prefix(), "-max-retries")};
   const LowerCaseString EnvoyNotForwarded{absl::StrCat(prefix(), "-not-forwarded")};
   const LowerCaseString EnvoyOriginalDstHost{absl::StrCat(prefix(), "-original-dst-host")};
+  const LowerCaseString EnvoyOriginalMethod{absl::StrCat(prefix(), "-original-method")};
   const LowerCaseString EnvoyOriginalPath{absl::StrCat(prefix(), "-original-path")};
   const LowerCaseString EnvoyOverloaded{absl::StrCat(prefix(), "-overloaded")};
   const LowerCaseString EnvoyRateLimited{absl::StrCat(prefix(), "-ratelimited")};
@@ -132,10 +132,8 @@ public:
   const LowerCaseString HostLegacy{"host"};
   const LowerCaseString Http2Settings{"http2-settings"};
   const LowerCaseString KeepAlive{"keep-alive"};
-  const LowerCaseString LastModified{"last-modified"};
   const LowerCaseString Location{"location"};
   const LowerCaseString Method{":method"};
-  const LowerCaseString NoChunks{":no-chunks"}; // Illegal pseudo-header used internally.
   const LowerCaseString Origin{"origin"};
   const LowerCaseString OtSpanContext{"x-ot-span-context"};
   const LowerCaseString Path{":path"};
@@ -241,6 +239,11 @@ public:
     const std::string Put{"PUT"};
     const std::string Trace{"TRACE"};
   } MethodValues;
+
+  struct {
+    // per https://tools.ietf.org/html/draft-kinnear-httpbis-http2-transport-02
+    const std::string Bytestream{"bytestream"};
+  } ProtocolValues;
 
   struct {
     const std::string Http{"http"};

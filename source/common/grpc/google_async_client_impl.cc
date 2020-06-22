@@ -16,9 +16,13 @@
 
 namespace Envoy {
 namespace Grpc {
+namespace {
+static constexpr int DefaultBufferLimitBytes = 1024 * 1024;
+}
 
 GoogleAsyncClientThreadLocal::GoogleAsyncClientThreadLocal(Api::Api& api)
-    : completion_thread_(api.threadFactory().createThread([this] { completionThread(); })) {}
+    : completion_thread_(api.threadFactory().createThread([this] { completionThread(); },
+                                                          Thread::Options{"GrpcGoogClient"})) {}
 
 GoogleAsyncClientThreadLocal::~GoogleAsyncClientThreadLocal() {
   // Force streams to shutdown and invoke TryCancel() to start the drain of
@@ -73,9 +77,11 @@ GoogleAsyncClientImpl::GoogleAsyncClientImpl(Event::Dispatcher& dispatcher,
                                              GoogleStubFactory& stub_factory,
                                              Stats::ScopeSharedPtr scope,
                                              const envoy::config::core::v3::GrpcService& config,
-                                             Api::Api& api)
+                                             Api::Api& api, const StatNames& stat_names)
     : dispatcher_(dispatcher), tls_(tls), stat_prefix_(config.google_grpc().stat_prefix()),
-      initial_metadata_(config.initial_metadata()), scope_(scope) {
+      initial_metadata_(config.initial_metadata()), scope_(scope),
+      per_stream_buffer_limit_bytes_(PROTOBUF_GET_WRAPPED_OR_DEFAULT(
+          config.google_grpc(), per_stream_buffer_limit_bytes, DefaultBufferLimitBytes)) {
   // We rebuild the channel each time we construct the channel. It appears that the gRPC library is
   // smart enough to do connection pooling and reuse with identical channel args, so this should
   // have comparable overhead to what we are doing in Grpc::AsyncClientImpl, i.e. no expensive
@@ -83,9 +89,11 @@ GoogleAsyncClientImpl::GoogleAsyncClientImpl(Event::Dispatcher& dispatcher,
   std::shared_ptr<grpc::Channel> channel = GoogleGrpcUtils::createChannel(config, api);
   stub_ = stub_factory.createStub(channel);
   // Initialize client stats.
-  stats_.streams_total_ = &scope_->counter("streams_total");
+  // TODO(jmarantz): Capture these names in async_client_manager_impl.cc and
+  // pass in a struct of StatName objects so we don't have to take locks here.
+  stats_.streams_total_ = &scope_->counterFromStatName(stat_names.streams_total_);
   for (uint32_t i = 0; i <= Status::WellKnownGrpcStatus::MaximumKnown; ++i) {
-    stats_.streams_closed_[i] = &scope_->counter(absl::StrCat("streams_closed_", i));
+    stats_.streams_closed_[i] = &scope_->counterFromStatName(stat_names.streams_closed_[i]);
   }
 }
 
@@ -107,7 +115,7 @@ AsyncRequest* GoogleAsyncClientImpl::sendRaw(absl::string_view service_full_name
   std::unique_ptr<GoogleAsyncStreamImpl> grpc_stream{async_request};
 
   grpc_stream->initialize(true);
-  if (grpc_stream->call_failed()) {
+  if (grpc_stream->callFailed()) {
     return nullptr;
   }
 
@@ -123,7 +131,7 @@ RawAsyncStream* GoogleAsyncClientImpl::startRaw(absl::string_view service_full_n
                                                              callbacks, options);
 
   grpc_stream->initialize(false);
-  if (grpc_stream->call_failed()) {
+  if (grpc_stream->callFailed()) {
     return nullptr;
   }
 
@@ -209,6 +217,7 @@ void GoogleAsyncStreamImpl::sendMessageRaw(Buffer::InstancePtr&& request, bool e
   write_pending_queue_.emplace(std::move(request), end_stream);
   ENVOY_LOG(trace, "Queued message to write ({} bytes)",
             write_pending_queue_.back().buf_.value().Length());
+  bytes_in_write_pending_queue_ += write_pending_queue_.back().buf_.value().Length();
   writeQueued();
 }
 
@@ -311,6 +320,7 @@ void GoogleAsyncStreamImpl::handleOpCompletion(GoogleAsyncTag::Operation op, boo
   case GoogleAsyncTag::Operation::Write: {
     ASSERT(ok);
     write_pending_ = false;
+    bytes_in_write_pending_queue_ -= write_pending_queue_.front().buf_.value().Length();
     write_pending_queue_.pop();
     writeQueued();
     break;
@@ -410,16 +420,16 @@ GoogleAsyncRequestImpl::GoogleAsyncRequestImpl(
 
 void GoogleAsyncRequestImpl::initialize(bool buffer_body_for_retry) {
   GoogleAsyncStreamImpl::initialize(buffer_body_for_retry);
-  if (this->call_failed()) {
+  if (callFailed()) {
     return;
   }
-  this->sendMessageRaw(std::move(request_), true);
+  sendMessageRaw(std::move(request_), true);
 }
 
 void GoogleAsyncRequestImpl::cancel() {
   current_span_->setTag(Tracing::Tags::get().Status, Tracing::Tags::get().Canceled);
   current_span_->finishSpan();
-  this->resetStream();
+  resetStream();
 }
 
 void GoogleAsyncRequestImpl::onCreateInitialMetadata(Http::RequestHeaderMap& metadata) {

@@ -1,19 +1,22 @@
 #pragma once
 
+#include <memory>
+
 #include "envoy/api/io_error.h"
 #include "envoy/common/platform.h"
 #include "envoy/common/pure.h"
+#include "envoy/network/address.h"
+
+#include "absl/container/fixed_array.h"
 
 namespace Envoy {
 namespace Buffer {
 struct RawSlice;
 } // namespace Buffer
 
+using RawSliceArrays = absl::FixedArray<absl::FixedArray<Buffer::RawSlice>>;
+
 namespace Network {
-namespace Address {
-class Instance;
-class Ip;
-} // namespace Address
 
 /**
  * IoHandle: an abstract interface for all I/O operations
@@ -74,21 +77,37 @@ public:
                                           int flags, const Address::Ip* self_ip,
                                           const Address::Instance& peer_address) PURE;
 
+  struct RecvMsgPerPacketInfo {
+    // The destination address from transport header.
+    Address::InstanceConstSharedPtr local_address_;
+    // The the source address from transport header.
+    Address::InstanceConstSharedPtr peer_address_;
+    // The payload length of this packet.
+    unsigned int msg_len_{0};
+  };
+
+  /**
+   * The output parameter type for recvmsg and recvmmsg.
+   */
   struct RecvMsgOutput {
     /*
+     * @param num_packets_per_call is the max number of packets allowed per
+     * recvmmsg call. For recvmsg call, any value larger than 0 is allowed, but
+     * only one packet will be returned.
      * @param dropped_packets points to a variable to store how many packets are
      * dropped so far. If nullptr, recvmsg() won't try to get this information
      * from transport header.
      */
-    RecvMsgOutput(uint32_t* dropped_packets) : dropped_packets_(dropped_packets) {}
+    RecvMsgOutput(size_t num_packets_per_call, uint32_t* dropped_packets)
+        : dropped_packets_(dropped_packets), msg_(num_packets_per_call) {}
 
     // If not nullptr, its value is the total number of packets dropped. recvmsg() will update it
     // when more packets are dropped.
     uint32_t* dropped_packets_;
-    // The destination address from transport header.
-    std::shared_ptr<const Address::Instance> local_address_;
-    // The the source address from transport header.
-    std::shared_ptr<const Address::Instance> peer_address_;
+
+    // Packet headers for each received packet. It's populated according to packet receive order.
+    // Only the first entry is used to return per packet information by recvmsg.
+    absl::FixedArray<RecvMsgPerPacketInfo> msg_;
   };
 
   /**
@@ -104,6 +123,74 @@ public:
    */
   virtual Api::IoCallUint64Result recvmsg(Buffer::RawSlice* slices, const uint64_t num_slice,
                                           uint32_t self_port, RecvMsgOutput& output) PURE;
+
+  /**
+   * If the platform supports, receive multiple messages into given slices, output overflow,
+   * source/destination addresses per message via passed-in parameters upon success.
+   * @param slices are the receive buffers for the messages. Each message
+   * received are stored in an individual entry of |slices|.
+   * @param self_port is the same as the one in recvmsg().
+   * @param output is modified upon each call and each message received.
+   */
+  virtual Api::IoCallUint64Result recvmmsg(RawSliceArrays& slices, uint32_t self_port,
+                                           RecvMsgOutput& output) PURE;
+
+  /**
+   * return true if the platform supports recvmmsg() and sendmmsg().
+   */
+  virtual bool supportsMmsg() const PURE;
+
+  /**
+   * Bind to address. The handle should have been created with a call to socket()
+   * @param address address to bind to.
+   * @param addrlen address length
+   * @return a Api::SysCallIntResult with rc_ = 0 for success and rc_ = -1 for failure. If the call
+   *   is successful, errno_ shouldn't be used.
+   */
+  virtual Api::SysCallIntResult bind(const sockaddr* address, socklen_t addrlen) PURE;
+
+  /**
+   * Listen on bound handle.
+   * @param backlog maximum number of pending connections for listener
+   * @return a Api::SysCallIntResult with rc_ = 0 for success and rc_ = -1 for failure. If the call
+   *   is successful, errno_ shouldn't be used.
+   */
+  virtual Api::SysCallIntResult listen(int backlog) PURE;
+
+  /**
+   * Connect to address. The handle should have been created with a call to socket()
+   * on this object.
+   * @param address remote address to connect to.
+   * @param addrlen remote address length
+   * @return a Api::SysCallIntResult with rc_ = 0 for success and rc_ = -1 for failure. If the call
+   *   is successful, errno_ shouldn't be used.
+   */
+  virtual Api::SysCallIntResult connect(const sockaddr* address, socklen_t addrlen) PURE;
+
+  /**
+   * Set option (see man 2 setsockopt)
+   */
+  virtual Api::SysCallIntResult setOption(int level, int optname, const void* optval,
+                                          socklen_t optlen) PURE;
+
+  /**
+   * Get option (see man 2 getsockopt)
+   */
+  virtual Api::SysCallIntResult getOption(int level, int optname, void* optval,
+                                          socklen_t* optlen) PURE;
+
+  /**
+   * Get local address to which handle is bound (see man 2 getsockname)
+   */
+  virtual Api::SysCallIntResult getLocalAddress(sockaddr* address, socklen_t* addrlen) PURE;
+
+  /**
+   * Toggle blocking behavior
+   * @param blocking flag to set/unset blocking state
+   * @return a Api::SysCallIntResult with rc_ = 0 for success and rc_ = -1 for failure. If the call
+   * is successful, errno_ shouldn't be used.
+   */
+  virtual Api::SysCallIntResult setBlocking(bool blocking) PURE;
 };
 
 using IoHandlePtr = std::unique_ptr<IoHandle>;

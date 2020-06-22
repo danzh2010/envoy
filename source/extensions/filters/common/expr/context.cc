@@ -31,19 +31,19 @@ absl::optional<CelValue> extractSslInfo(const Ssl::ConnectionInfo& ssl_info,
   } else if (value == SubjectPeerCertificate) {
     return CelValue::CreateString(&ssl_info.subjectPeerCertificate());
   } else if (value == URISanLocalCertificate) {
-    if (ssl_info.uriSanLocalCertificate().size() > 0) {
+    if (!ssl_info.uriSanLocalCertificate().empty()) {
       return CelValue::CreateString(&ssl_info.uriSanLocalCertificate()[0]);
     }
   } else if (value == URISanPeerCertificate) {
-    if (ssl_info.uriSanPeerCertificate().size() > 0) {
+    if (!ssl_info.uriSanPeerCertificate().empty()) {
       return CelValue::CreateString(&ssl_info.uriSanPeerCertificate()[0]);
     }
   } else if (value == DNSSanLocalCertificate) {
-    if (ssl_info.dnsSansLocalCertificate().size() > 0) {
+    if (!ssl_info.dnsSansLocalCertificate().empty()) {
       return CelValue::CreateString(&ssl_info.dnsSansLocalCertificate()[0]);
     }
   } else if (value == DNSSanPeerCertificate) {
-    if (ssl_info.dnsSansPeerCertificate().size() > 0) {
+    if (!ssl_info.dnsSansPeerCertificate().empty()) {
       return CelValue::CreateString(&ssl_info.dnsSansPeerCertificate()[0]);
     }
   }
@@ -67,7 +67,7 @@ absl::optional<CelValue> RequestWrapper::operator[](CelValue key) const {
     // (which is not available at the time of the request headers)
     if (headers_.value_ != nullptr && headers_.value_->ContentLength() != nullptr) {
       int64_t length;
-      if (absl::SimpleAtoi(headers_.value_->ContentLength()->value().getStringView(), &length)) {
+      if (absl::SimpleAtoi(headers_.value_->getContentLengthValue(), &length)) {
         return CelValue::CreateInt64(length);
       }
     } else {
@@ -93,7 +93,7 @@ absl::optional<CelValue> RequestWrapper::operator[](CelValue key) const {
     if (value == Path) {
       return convertHeaderEntry(headers_.value_->Path());
     } else if (value == UrlPath) {
-      absl::string_view path = headers_.value_->Path()->value().getStringView();
+      absl::string_view path = headers_.value_->getPathValue();
       size_t query_offset = path.find('?');
       if (query_offset == absl::string_view::npos) {
         return CelValue::CreateStringView(path);

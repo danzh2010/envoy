@@ -69,7 +69,7 @@ TEST_P(AutoSniIntegrationTest, BasicAutoSniTest) {
   setup();
   codec_client_ = makeHttpConnection(lookupPort("http"));
   const auto response_ = sendRequestAndWaitForResponse(
-      Http::TestHeaderMapImpl{
+      Http::TestRequestHeaderMapImpl{
           {":method", "GET"}, {":path", "/"}, {":scheme", "http"}, {":authority", "localhost"}},
       0, default_response_headers_, 0);
 
@@ -87,7 +87,7 @@ TEST_P(AutoSniIntegrationTest, PassingNotDNS) {
   setup();
   codec_client_ = makeHttpConnection(lookupPort("http"));
   const auto response_ = sendRequestAndWaitForResponse(
-      Http::TestHeaderMapImpl{
+      Http::TestRequestHeaderMapImpl{
           {":method", "GET"}, {":path", "/"}, {":scheme", "http"}, {":authority", "127.0.0.1"}},
       0, default_response_headers_, 0);
 
@@ -97,7 +97,7 @@ TEST_P(AutoSniIntegrationTest, PassingNotDNS) {
   const Extensions::TransportSockets::Tls::SslSocketInfo* ssl_socket =
       dynamic_cast<const Extensions::TransportSockets::Tls::SslSocketInfo*>(
           fake_upstream_connection_->connection().ssl().get());
-  EXPECT_STREQ(NULL, SSL_get_servername(ssl_socket->rawSslForTest(), TLSEXT_NAMETYPE_host_name));
+  EXPECT_STREQ(nullptr, SSL_get_servername(ssl_socket->rawSslForTest(), TLSEXT_NAMETYPE_host_name));
 }
 
 TEST_P(AutoSniIntegrationTest, PassingHostWithoutPort) {

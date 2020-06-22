@@ -46,7 +46,7 @@ private:
     Request(TestFilter& parent, Buffer::Instance& data) : parent_(parent) { data_.move(data); }
 
     // Tcp::ConnectionPool::Callbacks
-    void onPoolFailure(Tcp::ConnectionPool::PoolFailureReason,
+    void onPoolFailure(ConnectionPool::PoolFailureReason,
                        Upstream::HostDescriptionConstSharedPtr) override {
       ASSERT(false);
     }
@@ -112,23 +112,17 @@ public:
       : BaseIntegrationTest(GetParam(), tcp_conn_pool_config), filter_resolver_(config_factory_) {}
 
   // Called once by the gtest framework before any tests are run.
-  static void SetUpTestSuite() {
-    tcp_conn_pool_config = ConfigHelper::BASE_CONFIG + R"EOF(
+  static void SetUpTestSuite() { // NOLINT(readability-identifier-naming)
+    tcp_conn_pool_config = absl::StrCat(ConfigHelper::baseConfig(), R"EOF(
     filter_chains:
       - filters:
         - name: envoy.test.router
           config:
-      )EOF";
+      )EOF");
   }
 
   // Initializer for individual tests.
   void SetUp() override { BaseIntegrationTest::initialize(); }
-
-  // Destructor for individual tests.
-  void TearDown() override {
-    test_server_.reset();
-    fake_upstreams_.clear();
-  }
 
 private:
   TestFilterConfigFactory config_factory_;

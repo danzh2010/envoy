@@ -1,10 +1,10 @@
-licenses(["notice"])  # Apache 2
-
 load(
     "//bazel:envoy_build_system.bzl",
     "envoy_cc_test",
     "envoy_package",
 )
+
+licenses(["notice"])  # Apache 2
 
 envoy_package()
 
@@ -36,5 +36,15 @@ envoy_cc_test(
         "@envoy_api//envoy/config/accesslog/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/access_loggers/file/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/network/tcp_proxy/v3:pkg_cc_proto",
+    ],
+)
+
+envoy_cc_test(
+    name = "upstream_test",
+    srcs = ["upstream_test.cc"],
+    deps = [
+        "//source/common/tcp_proxy",
+        "//test/mocks/http:http_mocks",
+        "//test/mocks/tcp:tcp_mocks",
     ],
 )

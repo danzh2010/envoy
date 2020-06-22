@@ -9,11 +9,11 @@
 #include "envoy/extensions/transport_sockets/tls/v3/cert.pb.h"
 
 #include "common/config/protobuf_link_hacks.h"
-#include "common/config/resources.h"
 #include "common/protobuf/protobuf.h"
 #include "common/protobuf/utility.h"
 
 #include "test/test_common/network_utility.h"
+#include "test/test_common/resources.h"
 #include "test/test_common/utility.h"
 
 using testing::AssertionResult;
@@ -30,11 +30,7 @@ AdsIntegrationTest::AdsIntegrationTest()
   sotw_or_delta_ = sotwOrDelta();
 }
 
-void AdsIntegrationTest::TearDown() {
-  cleanUpXdsConnection();
-  test_server_.reset();
-  fake_upstreams_.clear();
-}
+void AdsIntegrationTest::TearDown() { cleanUpXdsConnection(); }
 
 envoy::config::cluster::v3::Cluster AdsIntegrationTest::buildCluster(const std::string& name) {
   return TestUtility::parseYaml<envoy::config::cluster::v3::Cluster>(fmt::format(R"EOF(

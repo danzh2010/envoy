@@ -11,7 +11,6 @@
 
 #include "absl/strings/match.h"
 
-using envoy::extensions::filters::http::jwt_authn::v3::JwtAuthentication;
 using envoy::extensions::filters::http::jwt_authn::v3::JwtProvider;
 using Envoy::Http::LowerCaseString;
 
@@ -209,7 +208,7 @@ ExtractorImpl::extract(const Http::RequestHeaderMap& headers) const {
   }
 
   // Check query parameter locations.
-  const auto& params = Http::Utility::parseQueryString(headers.Path()->value().getStringView());
+  const auto& params = Http::Utility::parseQueryString(headers.getPathValue());
   for (const auto& location_it : param_locations_) {
     const auto& param_key = location_it.first;
     const auto& location_spec = location_it.second;

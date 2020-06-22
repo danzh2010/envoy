@@ -7,53 +7,14 @@
 #include "envoy/common/platform.h"
 #include "envoy/network/connection.h"
 #include "envoy/network/listen_socket.h"
+#include "envoy/network/socket.h"
 
 #include "common/common/assert.h"
+#include "common/network/socket_impl.h"
+#include "common/network/socket_interface_impl.h"
 
 namespace Envoy {
 namespace Network {
-
-class SocketImpl : public virtual Socket {
-public:
-  ~SocketImpl() override { close(); }
-
-  // Network::Socket
-  const Address::InstanceConstSharedPtr& localAddress() const override { return local_address_; }
-  void setLocalAddress(const Address::InstanceConstSharedPtr& local_address) override {
-    local_address_ = local_address;
-  }
-
-  IoHandle& ioHandle() override { return *io_handle_; }
-  const IoHandle& ioHandle() const override { return *io_handle_; }
-  void close() override {
-    if (io_handle_->isOpen()) {
-      io_handle_->close();
-    }
-  }
-  bool isOpen() const override { return io_handle_->isOpen(); }
-  void ensureOptions() {
-    if (!options_) {
-      options_ = std::make_shared<std::vector<OptionConstSharedPtr>>();
-    }
-  }
-  void addOption(const OptionConstSharedPtr& option) override {
-    ensureOptions();
-    options_->emplace_back(std::move(option));
-  }
-  void addOptions(const OptionsSharedPtr& options) override {
-    ensureOptions();
-    Network::Socket::appendOptions(options_, options);
-  }
-  const OptionsSharedPtr& options() const override { return options_; }
-
-protected:
-  SocketImpl(IoHandlePtr&& io_handle, const Address::InstanceConstSharedPtr& local_address)
-      : io_handle_(std::move(io_handle)), local_address_(local_address) {}
-
-  const IoHandlePtr io_handle_;
-  Address::InstanceConstSharedPtr local_address_;
-  OptionsSharedPtr options_;
-};
 
 class ListenSocketImpl : public SocketImpl {
 protected:
@@ -61,29 +22,30 @@ protected:
       : SocketImpl(std::move(io_handle), local_address) {}
 
   void setupSocket(const Network::Socket::OptionsSharedPtr& options, bool bind_to_port);
-  void doBind();
   void setListenSocketOptions(const Network::Socket::OptionsSharedPtr& options);
+  Api::SysCallIntResult bind(Network::Address::InstanceConstSharedPtr address) override;
 };
 
 /**
  * Wraps a unix socket.
  */
-template <Address::SocketType T> struct NetworkSocketTrait {};
+template <Socket::Type T> struct NetworkSocketTrait {};
 
-template <> struct NetworkSocketTrait<Address::SocketType::Stream> {
-  static constexpr Address::SocketType type = Address::SocketType::Stream;
+template <> struct NetworkSocketTrait<Socket::Type::Stream> {
+  static constexpr Socket::Type type = Socket::Type::Stream;
 };
 
-template <> struct NetworkSocketTrait<Address::SocketType::Datagram> {
-  static constexpr Address::SocketType type = Address::SocketType::Datagram;
+template <> struct NetworkSocketTrait<Socket::Type::Datagram> {
+  static constexpr Socket::Type type = Socket::Type::Datagram;
 };
 
 template <typename T> class NetworkListenSocket : public ListenSocketImpl {
 public:
   NetworkListenSocket(const Address::InstanceConstSharedPtr& address,
                       const Network::Socket::OptionsSharedPtr& options, bool bind_to_port)
-      : ListenSocketImpl(address->socket(T::type), address) {
-    RELEASE_ASSERT(io_handle_->fd() != -1, "");
+      : ListenSocketImpl(Network::SocketInterfaceSingleton::get().socket(T::type, address),
+                         address) {
+    RELEASE_ASSERT(SOCKET_VALID(io_handle_->fd()), "");
 
     setPrebindSocketOptions();
 
@@ -96,23 +58,23 @@ public:
     setListenSocketOptions(options);
   }
 
-  Address::SocketType socketType() const override { return T::type; }
+  Socket::Type socketType() const override { return T::type; }
 
 protected:
   void setPrebindSocketOptions();
 };
 
-using TcpListenSocket = NetworkListenSocket<NetworkSocketTrait<Address::SocketType::Stream>>;
+using TcpListenSocket = NetworkListenSocket<NetworkSocketTrait<Socket::Type::Stream>>;
 using TcpListenSocketPtr = std::unique_ptr<TcpListenSocket>;
 
-using UdpListenSocket = NetworkListenSocket<NetworkSocketTrait<Address::SocketType::Datagram>>;
+using UdpListenSocket = NetworkListenSocket<NetworkSocketTrait<Socket::Type::Datagram>>;
 using UdpListenSocketPtr = std::unique_ptr<UdpListenSocket>;
 
 class UdsListenSocket : public ListenSocketImpl {
 public:
   UdsListenSocket(const Address::InstanceConstSharedPtr& address);
   UdsListenSocket(IoHandlePtr&& io_handle, const Address::InstanceConstSharedPtr& address);
-  Address::SocketType socketType() const override { return Address::SocketType::Stream; }
+  Socket::Type socketType() const override { return Socket::Type::Stream; }
 };
 
 class ConnectionSocketImpl : public SocketImpl, public ConnectionSocket {
@@ -120,13 +82,24 @@ public:
   ConnectionSocketImpl(IoHandlePtr&& io_handle,
                        const Address::InstanceConstSharedPtr& local_address,
                        const Address::InstanceConstSharedPtr& remote_address)
-      : SocketImpl(std::move(io_handle), local_address), remote_address_(remote_address) {}
+      : SocketImpl(std::move(io_handle), local_address), remote_address_(remote_address),
+        direct_remote_address_(remote_address) {}
+
+  ConnectionSocketImpl(Socket::Type type, const Address::InstanceConstSharedPtr& local_address,
+                       const Address::InstanceConstSharedPtr& remote_address)
+      : SocketImpl(type, local_address), remote_address_(remote_address),
+        direct_remote_address_(remote_address) {
+    setLocalAddress(local_address);
+  }
 
   // Network::Socket
-  Address::SocketType socketType() const override { return Address::SocketType::Stream; }
+  Socket::Type socketType() const override { return Socket::Type::Stream; }
 
   // Network::ConnectionSocket
   const Address::InstanceConstSharedPtr& remoteAddress() const override { return remote_address_; }
+  const Address::InstanceConstSharedPtr& directRemoteAddress() const override {
+    return direct_remote_address_;
+  }
   void restoreLocalAddress(const Address::InstanceConstSharedPtr& local_address) override {
     setLocalAddress(local_address);
     local_address_restored_ = true;
@@ -158,6 +131,7 @@ public:
 
 protected:
   Address::InstanceConstSharedPtr remote_address_;
+  const Address::InstanceConstSharedPtr direct_remote_address_;
   bool local_address_restored_{false};
   std::string transport_protocol_;
   std::vector<std::string> application_protocols_;
@@ -177,8 +151,9 @@ class ClientSocketImpl : public ConnectionSocketImpl {
 public:
   ClientSocketImpl(const Address::InstanceConstSharedPtr& remote_address,
                    const OptionsSharedPtr& options)
-      : ConnectionSocketImpl(remote_address->socket(Address::SocketType::Stream), nullptr,
-                             remote_address) {
+      : ConnectionSocketImpl(
+            Network::SocketInterfaceSingleton::get().socket(Socket::Type::Stream, remote_address),
+            nullptr, remote_address) {
     if (options) {
       addOptions(options);
     }

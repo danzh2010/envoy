@@ -1,14 +1,15 @@
-licenses(["notice"])  # Apache 2
-
 load(
     "//bazel:envoy_build_system.bzl",
+    "envoy_benchmark_test",
+    "envoy_cc_benchmark_binary",
     "envoy_cc_fuzz_test",
     "envoy_cc_test",
-    "envoy_cc_test_binary",
     "envoy_cc_test_library",
     "envoy_package",
     "envoy_proto_library",
 )
+
+licenses(["notice"])  # Apache 2
 
 envoy_package()
 
@@ -37,8 +38,19 @@ envoy_cc_test(
 )
 
 envoy_cc_test(
+    name = "async_client_utility_test",
+    srcs = ["async_client_utility_test.cc"],
+    deps = [
+        "//source/common/http:async_client_utility_lib",
+        "//test/mocks/http:http_mocks",
+    ],
+)
+
+envoy_cc_test(
     name = "codec_client_test",
     srcs = ["codec_client_test.cc"],
+    # IpVersions/CodecNetworkTest.SendData/IPv4: Test times out on Windows.
+    tags = ["fails_on_windows"],
     deps = [
         ":common_lib",
         "//source/common/buffer:buffer_lib",
@@ -106,7 +118,7 @@ envoy_cc_test(
     ],
 )
 
-envoy_cc_test_binary(
+envoy_cc_benchmark_binary(
     name = "codes_speed_test",
     srcs = ["codes_speed_test.cc"],
     external_deps = [
@@ -117,6 +129,11 @@ envoy_cc_test_binary(
         "//source/common/stats:isolated_store_lib",
         "//source/common/stats:stats_lib",
     ],
+)
+
+envoy_benchmark_test(
+    name = "codes_speed_test_benchmark_test",
+    benchmark_binary = "codes_speed_test",
 )
 
 envoy_cc_test_library(
@@ -137,6 +154,7 @@ envoy_proto_library(
     srcs = ["conn_manager_impl_fuzz.proto"],
     deps = [
         "//test/fuzz:common_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg",
     ],
 )
 
@@ -146,10 +164,12 @@ envoy_cc_fuzz_test(
     corpus = "conn_manager_impl_corpus",
     deps = [
         ":conn_manager_impl_fuzz_proto_cc_proto",
+        "//include/envoy/http:request_id_extension_interface",
         "//source/common/common:empty_string",
         "//source/common/http:conn_manager_lib",
         "//source/common/http:context_lib",
         "//source/common/http:date_provider_lib",
+        "//source/common/http:request_id_extension_lib",
         "//source/common/network:address_lib",
         "//source/common/network:utility_lib",
         "//source/common/stats:symbol_table_creator_lib",
@@ -176,18 +196,20 @@ envoy_cc_test(
         "//include/envoy/access_log:access_log_interface",
         "//include/envoy/buffer:buffer_interface",
         "//include/envoy/event:dispatcher_interface",
+        "//include/envoy/http:request_id_extension_interface",
         "//include/envoy/tracing:http_tracer_interface",
-        "//source/common/access_log:access_log_formatter_lib",
         "//source/common/access_log:access_log_lib",
         "//source/common/buffer:buffer_lib",
         "//source/common/common:macros",
         "//source/common/event:dispatcher_lib",
+        "//source/common/formatter:substitution_formatter_lib",
         "//source/common/http:conn_manager_lib",
         "//source/common/http:context_lib",
         "//source/common/http:date_provider_lib",
         "//source/common/http:exception_lib",
         "//source/common/http:header_map_lib",
         "//source/common/http:headers_lib",
+        "//source/common/http:request_id_extension_lib",
         "//source/common/network:address_lib",
         "//source/common/stats:stats_lib",
         "//source/common/upstream:upstream_includes",
@@ -207,6 +229,7 @@ envoy_cc_test(
         "//test/mocks/tracing:tracing_mocks",
         "//test/mocks/upstream:upstream_mocks",
         "//test/test_common:logging_lib",
+        "//test/test_common:test_runtime_lib",
         "//test/test_common:test_time_lib",
         "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
         "@envoy_api//envoy/type/tracing/v3:pkg_cc_proto",
@@ -218,13 +241,14 @@ envoy_cc_test(
     name = "conn_manager_utility_test",
     srcs = ["conn_manager_utility_test.cc"],
     deps = [
+        "//include/envoy/http:request_id_extension_interface",
         "//source/common/event:dispatcher_lib",
         "//source/common/http:conn_manager_lib",
         "//source/common/http:headers_lib",
+        "//source/common/http:request_id_extension_lib",
         "//source/common/network:address_lib",
         "//source/common/network:utility_lib",
         "//source/common/runtime:runtime_lib",
-        "//source/common/runtime:uuid_util_lib",
         "//test/mocks/http:http_mocks",
         "//test/mocks/local_info:local_info_mocks",
         "//test/mocks/network:network_mocks",
@@ -253,13 +277,14 @@ envoy_cc_test(
     name = "header_map_impl_test",
     srcs = ["header_map_impl_test.cc"],
     deps = [
+        "//source/common/http:header_list_view_lib",
         "//source/common/http:header_map_lib",
         "//source/common/http:header_utility_lib",
         "//test/test_common:utility_lib",
     ],
 )
 
-envoy_cc_test_binary(
+envoy_cc_benchmark_binary(
     name = "header_map_impl_speed_test",
     srcs = ["header_map_impl_speed_test.cc"],
     external_deps = [
@@ -268,6 +293,11 @@ envoy_cc_test_binary(
     deps = [
         "//source/common/http:header_map_lib",
     ],
+)
+
+envoy_benchmark_test(
+    name = "header_map_impl_speed_test_benchmark_test",
+    benchmark_binary = "header_map_impl_speed_test",
 )
 
 envoy_proto_library(
@@ -311,6 +341,7 @@ envoy_cc_test(
 envoy_proto_library(
     name = "utility_fuzz_proto",
     srcs = ["utility_fuzz.proto"],
+    deps = ["@envoy_api//envoy/config/core/v3:pkg"],
 )
 
 envoy_cc_fuzz_test(
@@ -346,5 +377,24 @@ envoy_cc_test(
     deps = [
         "//source/common/http:header_map_lib",
         "//source/common/http:path_utility_lib",
+    ],
+)
+
+envoy_cc_test(
+    name = "request_id_extension_uuid_impl_test",
+    srcs = ["request_id_extension_uuid_impl_test.cc"],
+    deps = [
+        "//source/common/http:request_id_extension_lib",
+        "//source/common/runtime:runtime_lib",
+        "//test/mocks/runtime:runtime_mocks",
+        "//test/test_common:utility_lib",
+    ],
+)
+
+envoy_cc_test(
+    name = "status_test",
+    srcs = ["status_test.cc"],
+    deps = [
+        "//source/common/http:status_lib",
     ],
 )

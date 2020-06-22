@@ -152,17 +152,17 @@ public:
   // Creates a test fixture with an upstream bound to INADDR_ANY on an unspecified port using the
   // provided IP |version|.
   BaseIntegrationTest(Network::Address::IpVersion version,
-                      const std::string& config = ConfigHelper::HTTP_PROXY_CONFIG);
+                      const std::string& config = ConfigHelper::httpProxyConfig());
   BaseIntegrationTest(Network::Address::IpVersion version, TestTimeSystemPtr,
-                      const std::string& config = ConfigHelper::HTTP_PROXY_CONFIG)
+                      const std::string& config = ConfigHelper::httpProxyConfig())
       : BaseIntegrationTest(version, config) {}
   // Creates a test fixture with a specified |upstream_address| function that provides the IP and
   // port to use.
   BaseIntegrationTest(const InstanceConstSharedPtrFn& upstream_address_fn,
                       Network::Address::IpVersion version,
-                      const std::string& config = ConfigHelper::HTTP_PROXY_CONFIG);
+                      const std::string& config = ConfigHelper::httpProxyConfig());
 
-  virtual ~BaseIntegrationTest() = default;
+  virtual ~BaseIntegrationTest();
 
   // TODO(jmarantz): Remove this once
   // https://github.com/envoyproxy/envoy-filter-example/pull/69 is reverted.
@@ -197,17 +197,20 @@ public:
   void setUpstreamAddress(uint32_t upstream_index,
                           envoy::config::endpoint::v3::LbEndpoint& endpoint) const;
 
-  virtual Network::ClientConnectionPtr makeClientConnection(uint32_t port);
+  Network::ClientConnectionPtr makeClientConnection(uint32_t port);
+  virtual Network::ClientConnectionPtr
+  makeClientConnectionWithOptions(uint32_t port,
+                                  const Network::ConnectionSocket::OptionsSharedPtr& options);
 
   void registerTestServerPorts(const std::vector<std::string>& port_names);
   void createTestServer(const std::string& json_path, const std::vector<std::string>& port_names);
   void createGeneratedApiTestServer(const std::string& bootstrap_path,
                                     const std::vector<std::string>& port_names,
-                                    bool allow_unknown_static_fields,
-                                    bool reject_unknown_dynamic_fields, bool allow_lds_rejection);
+                                    Server::FieldValidationConfig validator_config,
+                                    bool allow_lds_rejection);
   void createApiTestServer(const ApiFilesystemConfig& api_filesystem_config,
                            const std::vector<std::string>& port_names,
-                           bool allow_unknown_static_fields, bool reject_unknown_dynamic_fields,
+                           Server::FieldValidationConfig validator_config,
                            bool allow_lds_rejection);
 
   Event::TestTimeSystem& timeSystem() { return time_system_; }
@@ -216,6 +219,13 @@ public:
   Api::ApiPtr api_;
   Api::ApiPtr api_for_server_stat_store_;
   MockBufferFactory* mock_buffer_factory_; // Will point to the dispatcher's factory.
+
+  // Enable the listener access log
+  void useListenerAccessLog(absl::string_view format = "");
+  // Waits for the nth access log entry, defaulting to log entry 0.
+  std::string waitForAccessLog(const std::string& filename, uint32_t entry = 0);
+
+  std::string listener_access_log_name_;
 
   // Functions for testing reloadable config (xDS)
   void createXdsUpstream();
@@ -318,7 +328,7 @@ public:
       resource->set_name(TestUtility::xdsResourceName(temp_any));
       resource->set_version(version);
       resource->mutable_resource()->PackFrom(API_DOWNGRADE(message));
-      for (const auto alias : aliases) {
+      for (const auto& alias : aliases) {
         resource->add_aliases(alias);
       }
     }
@@ -347,6 +357,21 @@ public:
    **/
   void sendRawHttpAndWaitForResponse(int port, const char* raw_http, std::string* response,
                                      bool disconnect_after_headers_complete = false);
+
+  /**
+   * Helper to create ConnectionDriver.
+   *
+   * @param port the port to connect to.
+   * @param initial_data the data to send.
+   * @param data_callback the callback on the received data.
+   **/
+  std::unique_ptr<RawConnectionDriver> createConnectionDriver(
+      uint32_t port, const std::string& initial_data,
+      std::function<void(Network::ClientConnection&, const Buffer::Instance&)>&& data_callback) {
+    Buffer::OwnedImpl buffer(initial_data);
+    return std::make_unique<RawConnectionDriver>(port, buffer, data_callback, version_,
+                                                 *dispatcher_);
+  }
 
 protected:
   // Create the envoy server in another thread and start it.
@@ -408,6 +433,13 @@ protected:
   // The number of worker threads that the test server uses.
   uint32_t concurrency_{1};
 
+  // The duration of the drain manager graceful drain period.
+  std::chrono::seconds drain_time_{1};
+
+  // The DrainStrategy that dictates the behaviour of
+  // DrainManagerImpl::drainClose().
+  Server::DrainStrategy drain_strategy_{Server::DrainStrategy::Gradual};
+
   // Member variables for xDS testing.
   FakeUpstream* xds_upstream_{};
   FakeHttpConnectionPtr xds_connection_;
@@ -418,6 +450,10 @@ protected:
   bool tls_xds_upstream_{false};
   bool use_lds_{true}; // Use the integration framework's LDS set up.
   Grpc::SotwOrDelta sotw_or_delta_{Grpc::SotwOrDelta::Sotw};
+
+  // By default the test server will use custom stats to notify on increment.
+  // This override exists for tests measuring stats memory.
+  bool use_real_stats_{};
 
 private:
   // The type for the Envoy-to-backend connection
