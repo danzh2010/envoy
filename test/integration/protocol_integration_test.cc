@@ -35,6 +35,7 @@
 #include "test/test_common/environment.h"
 #include "test/test_common/network_utility.h"
 #include "test/test_common/registry.h"
+#include "test/extensions/quic_listeners/quiche/integration/test_utils.h"
 
 #include "absl/time/time.h"
 #include "gtest/gtest.h"
@@ -68,7 +69,7 @@ protected:
   }
 
   void verifyUpStreamRequestAfterStopAllFilter() {
-    if (downstreamProtocol() == Http::CodecClient::Type::HTTP2) {
+    if (downstreamProtocol() >= Http::CodecClient::Type::HTTP2) {
       // decode-headers-return-stop-all-filter calls addDecodedData in decodeData and
       // decodeTrailers. 2 decoded data were added.
       EXPECT_EQ(count_ * size_ + added_decoded_data_size_ * 2, upstream_request_->bodyLength());
@@ -84,7 +85,7 @@ protected:
   const int buffer_limit_ = 100;
 };
 
-// Tests for ProtocolIntegrationTest will be run with the full mesh of H1/H2
+// Tests for ProtocolIntegrationTest will be run with the full mesh of H1/H2/H3
 // downstream and H1/H2 upstreams.
 using ProtocolIntegrationTest = HttpProtocolIntegrationTest;
 
@@ -121,9 +122,9 @@ TEST_P(DownstreamProtocolIntegrationTest, RouterClusterNotFound404) {
   config_helper_.addVirtualHost(host);
   initialize();
 
-  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
-      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com");
-  ASSERT_TRUE(response->complete());
+  BufferingStreamDecoderPtr response = (downstream_protocol_ <=  Http::CodecClient::Type::HTTP2 ? IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com"): Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/unknown", "", version_, "foo.com"));
+  ASSERT_TRUE(response->complete()) ;
   EXPECT_EQ("404", response->headers().getStatusValue());
 }
 
@@ -136,8 +137,8 @@ TEST_P(DownstreamProtocolIntegrationTest, RouterClusterNotFound503) {
   config_helper_.addVirtualHost(host);
   initialize();
 
-  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
-      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com");
+  BufferingStreamDecoderPtr response = (downstream_protocol_ <=  Http::CodecClient::Type::HTTP2 ? IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com"): Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/unknown", "", version_, "foo.com"));
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("503", response->headers().getStatusValue());
 }
@@ -149,8 +150,8 @@ TEST_P(ProtocolIntegrationTest, RouterRedirect) {
   config_helper_.addVirtualHost(host);
   initialize();
 
-  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
-      lookupPort("http"), "GET", "/foo", "", downstream_protocol_, version_, "www.redirect.com");
+  BufferingStreamDecoderPtr response =(downstream_protocol_ <=  Http::CodecClient::Type::HTTP2 ? IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/foo", "", downstream_protocol_, version_, "www.redirect.com"): Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/foo", "", version_, "www.redirect.com"));
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("301", response->headers().getStatusValue());
   EXPECT_EQ("https://www.redirect.com/foo",
@@ -301,7 +302,7 @@ typed_config:
   upstream_request_->encodeData(128, true);
   response->waitForEndStream();
 
-  if (upstreamProtocol() == FakeHttpConnection::Type::HTTP2) {
+  if (upstreamProtocol() >= FakeHttpConnection::Type::HTTP2) {
     EXPECT_EQ("decode", upstream_request_->trailers()
                             ->get(Http::LowerCaseString("grpc-message"))[0]
                             ->value()
@@ -309,7 +310,7 @@ typed_config:
   }
   EXPECT_TRUE(response->complete());
   EXPECT_EQ("503", response->headers().getStatusValue());
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP2) {
+  if (downstream_protocol_ >= Http::CodecClient::Type::HTTP2) {
     EXPECT_EQ("encode", response->trailers()->getGrpcMessageValue());
   }
 }
@@ -845,7 +846,7 @@ TEST_P(DownstreamProtocolIntegrationTest, HittingDecoderFilterLimit) {
   // the 413-and-connection-close may be sent while the body is still being
   // sent, resulting in a write error and the connection being closed before the
   // response is read.
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP2) {
+  if (downstream_protocol_ >= Http::CodecClient::Type::HTTP2) {
     ASSERT_TRUE(response->complete());
   }
   if (response->complete()) {
@@ -1084,10 +1085,10 @@ TEST_P(ProtocolIntegrationTest, 304WithBody) {
     test_server_->waitForCounterGe("cluster.cluster_0.upstream_cx_protocol_error", 1);
   }
 
-  // Only for HTTP/2, where streams are ended with an explicit end-stream so we
+  // Only for HTTP/2 and Http/3, where streams are ended with an explicit end-stream so we
   // can differentiate between 304-with-advertised-but-absent-body and
   // 304-with-body, is there a protocol error on the active stream.
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP2 &&
+  if (downstream_protocol_ >= Http::CodecClient::Type::HTTP2 &&
       upstreamProtocol() == FakeHttpConnection::Type::HTTP2) {
     response->waitForReset();
   }
@@ -1462,7 +1463,7 @@ TEST_P(ProtocolIntegrationTest, LargeRequestMethod) {
     EXPECT_TRUE(response->complete());
     EXPECT_EQ("400", response->headers().getStatusValue());
   } else {
-    ASSERT(downstreamProtocol() == Http::CodecClient::Type::HTTP2);
+    ASSERT(downstreamProtocol() >= Http::CodecClient::Type::HTTP2);
     if (upstreamProtocol() == FakeHttpConnection::Type::HTTP1) {
       auto response = codec_client_->makeHeaderOnlyRequest(request_headers);
       ASSERT_TRUE(
@@ -1995,7 +1996,7 @@ TEST_P(DownstreamProtocolIntegrationTest, Test100AndDisconnectLegacy) {
 // run with both HTTP/1 and HTTP/2 upstreams.
 INSTANTIATE_TEST_SUITE_P(Protocols, DownstreamProtocolIntegrationTest,
                          testing::ValuesIn(HttpProtocolIntegrationTest::getProtocolTestParams(
-                             {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2},
+                             {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2, Http::CodecClient::Type::HTTP3},
                              {FakeHttpConnection::Type::HTTP1})),
                          HttpProtocolIntegrationTest::protocolTestParamsToString);
 

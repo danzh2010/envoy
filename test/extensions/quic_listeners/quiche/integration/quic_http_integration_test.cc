@@ -9,7 +9,6 @@
 
 #include "test/config/utility.h"
 #include "test/integration/http_integration.h"
-#include "test/integration/ssl_utility.h"
 #include "test/test_common/test_runtime.h"
 #include "test/test_common/utility.h"
 
@@ -19,8 +18,6 @@
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
 
-#include "quiche/quic/core/http/quic_client_push_promise_index.h"
-#include "quiche/quic/core/quic_utils.h"
 #include "quiche/quic/test_tools/quic_test_utils.h"
 
 #if defined(__GNUC__)
@@ -29,14 +26,10 @@
 
 #include "extensions/quic_listeners/quiche/envoy_quic_client_session.h"
 #include "extensions/quic_listeners/quiche/envoy_quic_client_connection.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_proof_verifier.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
 #include "extensions/quic_listeners/quiche/envoy_quic_packet_writer.h"
 #include "extensions/quic_listeners/quiche/envoy_quic_utils.h"
-#include "extensions/quic_listeners/quiche/quic_transport_socket_factory.h"
 #include "test/extensions/quic_listeners/quiche/test_utils.h"
-#include "extensions/transport_sockets/tls/context_config_impl.h"
+
 
 namespace Envoy {
 namespace Quic {
@@ -56,86 +49,29 @@ void updateResource(AtomicFileUpdater& updater, double pressure) {
   updater.update(absl::StrCat(pressure));
 }
 
-std::unique_ptr<QuicClientTransportSocketFactory>
-createQuicClientTransportSocketFactory(const Ssl::ClientSslTransportOptions& options, Api::Api& api,
-                                       const std::string& san_to_match) {
-  std::string yaml_plain = R"EOF(
-  common_tls_context:
-    validation_context:
-      trusted_ca:
-        filename: "{{ test_rundir }}/test/config/integration/certs/cacert.pem"
-)EOF";
-  envoy::extensions::transport_sockets::tls::v3::UpstreamTlsContext tls_context;
-  TestUtility::loadFromYaml(TestEnvironment::substitute(yaml_plain), tls_context);
-  auto* common_context = tls_context.mutable_common_tls_context();
-
-  if (options.alpn_) {
-    common_context->add_alpn_protocols("h3");
-  }
-  if (options.san_) {
-    common_context->mutable_validation_context()->add_match_subject_alt_names()->set_exact(
-        san_to_match);
-  }
-  for (const std::string& cipher_suite : options.cipher_suites_) {
-    common_context->mutable_tls_params()->add_cipher_suites(cipher_suite);
-  }
-  if (!options.sni_.empty()) {
-    tls_context.set_sni(options.sni_);
-  }
-
-  common_context->mutable_tls_params()->set_tls_minimum_protocol_version(options.tls_version_);
-  common_context->mutable_tls_params()->set_tls_maximum_protocol_version(options.tls_version_);
-
-  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
-  ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(api));
-  auto cfg = std::make_unique<Extensions::TransportSockets::Tls::ClientContextConfigImpl>(
-      tls_context, options.sigalgs_, mock_factory_ctx);
-  return std::make_unique<QuicClientTransportSocketFactory>(std::move(cfg));
-}
-
 class QuicHttpIntegrationTest : public HttpIntegrationTest, public QuicMultiVersionTest {
 public:
   QuicHttpIntegrationTest()
       : HttpIntegrationTest(Http::CodecClient::Type::HTTP3, GetParam().first,
                             ConfigHelper::quicHttpProxyConfig()),
-        supported_versions_([]() {
-          if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
-            return quic::CurrentSupportedVersionsWithQuicCrypto();
-          }
-          bool use_http3 = GetParam().second == QuicVersionType::Iquic;
-          SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
-          SetQuicReloadableFlag(quic_disable_version_draft_27, !use_http3);
-          return quic::CurrentSupportedVersions();
-        }()),
-        conn_helper_(*dispatcher_), alarm_factory_(*dispatcher_, *conn_helper_.GetClock()),
         injected_resource_filename_1_(TestEnvironment::temporaryPath("injected_resource_1")),
         injected_resource_filename_2_(TestEnvironment::temporaryPath("injected_resource_2")),
         file_updater_1_(injected_resource_filename_1_),
-        file_updater_2_(injected_resource_filename_2_) {}
+        file_updater_2_(injected_resource_filename_2_) {
+          if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
+  supported_versions_ = quic::CurrentSupportedVersionsWithQuicCrypto();
+          } else {
+          bool use_http3 = GetParam().second == QuicVersionType::Iquic;
+          SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
+          SetQuicReloadableFlag(quic_disable_version_draft_27, !use_http3);
+          supported_versions_ =  quic::CurrentSupportedVersions();
+        }
+        }
 
   ~QuicHttpIntegrationTest() override { cleanupUpstreamAndDownstream(); }
 
-  Network::ClientConnectionPtr makeClientConnectionWithOptions(
-      uint32_t port, const Network::ConnectionSocket::OptionsSharedPtr& options) override {
-    // Setting socket options is not supported.
-    ASSERT(!options);
-    server_addr_ = Network::Utility::resolveUrl(
-        fmt::format("udp://{}:{}", Network::Test::getLoopbackAddressUrlString(version_), port));
-    Network::Address::InstanceConstSharedPtr local_addr =
-        Network::Test::getCanonicalLoopbackAddress(version_);
-    // Initiate a QUIC connection with the highest supported version. If not
-    // supported by server, this connection will fail.
-    // TODO(danzh) Implement retry upon version mismatch and modify test frame work to specify a
-    // different version set on server side to test that.
-    auto connection = std::make_unique<EnvoyQuicClientConnection>(
-        getNextConnectionId(), server_addr_, conn_helper_, alarm_factory_,
-        quic::ParsedQuicVersionVector{supported_versions_[0]}, local_addr, *dispatcher_, nullptr);
-    quic_connection_ = connection.get();
-    auto session = std::make_unique<EnvoyQuicClientSession>(
-        quic_config_, supported_versions_, std::move(connection), server_id_, crypto_config_.get(),
-        &push_promise_index_, *dispatcher_, 0);
-    session->Initialize();
-    return session;
+  void SetUp() override {
+    setUpstreamProtocol(FakeHttpConnection::Type::HTTP2);
   }
 
   // This call may fail because of INVALID_VERSION, because QUIC connection doesn't support
@@ -148,19 +84,15 @@ public:
       absl::optional<envoy::config::core::v3::Http2ProtocolOptions> http2_options) override {
     IntegrationCodecClientPtr codec =
         HttpIntegrationTest::makeRawHttpConnection(std::move(conn), http2_options);
-    if (codec->disconnected()) {
-      // Connection may get closed during version negotiation or handshake.
-      ENVOY_LOG(error, "Fail to connect to server with error: {}",
-                codec->connection()->transportFailureReason());
-    } else {
+    if (!codec->disconnected()) {
       codec->setCodecClientCallbacks(client_codec_callback_);
     }
     return codec;
   }
 
-  quic::QuicConnectionId getNextConnectionId() {
+  quic::QuicConnectionId getNextConnectionId() override {
     if (designated_connection_ids_.empty()) {
-      return quic::QuicUtils::CreateRandomConnectionId();
+      return HttpIntegrationTest::getNextConnectionId();
     }
     quic::QuicConnectionId cid = designated_connection_ids_.front();
     designated_connection_ids_.pop_front();
@@ -169,18 +101,6 @@ public:
 
   void initialize() override {
     config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
-      envoy::extensions::transport_sockets::quic::v3::QuicDownstreamTransport
-          quic_transport_socket_config;
-      auto tls_context = quic_transport_socket_config.mutable_downstream_tls_context();
-      ConfigHelper::initializeTls(ConfigHelper::ServerSslOptions().setRsaCert(true).setTlsV13(true),
-                                  *tls_context->mutable_common_tls_context());
-      auto* filter_chain =
-          bootstrap.mutable_static_resources()->mutable_listeners(0)->mutable_filter_chains(0);
-      auto* transport_socket = filter_chain->mutable_transport_socket();
-      transport_socket->mutable_typed_config()->PackFrom(quic_transport_socket_config);
-
-      bootstrap.mutable_static_resources()->mutable_listeners(0)->set_reuse_port(set_reuse_port_);
-
       const std::string overload_config =
           fmt::format(R"EOF(
         refresh_interval:
@@ -216,26 +136,9 @@ public:
       *bootstrap.mutable_overload_manager() =
           TestUtility::parseYaml<envoy::config::overload::v3::OverloadManager>(overload_config);
     });
-    config_helper_.addConfigModifier(
-        [](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
-               hcm) {
-          hcm.mutable_drain_timeout()->clear_seconds();
-          hcm.mutable_drain_timeout()->set_nanos(500 * 1000 * 1000);
-          EXPECT_EQ(hcm.codec_type(), envoy::extensions::filters::network::http_connection_manager::
-                                          v3::HttpConnectionManager::HTTP3);
-        });
-
     updateResource(file_updater_1_, 0);
     updateResource(file_updater_2_, 0);
     HttpIntegrationTest::initialize();
-    registerTestServerPorts({"http"});
-    crypto_config_ =
-        std::make_unique<quic::QuicCryptoClientConfig>(std::make_unique<EnvoyQuicProofVerifier>(
-            stats_store_,
-            createQuicClientTransportSocketFactory(
-                Ssl::ClientSslTransportOptions().setAlpn(true).setSan(true), *api_, san_to_match_)
-                ->clientContextConfig(),
-            timeSystem()));
   }
 
   void testMultipleQuicConnections() {
@@ -281,18 +184,9 @@ public:
   }
 
 protected:
-  quic::QuicConfig quic_config_;
-  quic::QuicServerId server_id_{"lyft.com", 443, false};
-  std::string san_to_match_{"spiffe://lyft.com/backend-team"};
-  quic::QuicClientPushPromiseIndex push_promise_index_;
-  quic::ParsedQuicVersionVector supported_versions_;
-  std::unique_ptr<quic::QuicCryptoClientConfig> crypto_config_;
-  EnvoyQuicConnectionHelper conn_helper_;
-  EnvoyQuicAlarmFactory alarm_factory_;
   CodecClientCallbacksForTest client_codec_callback_;
   Network::Address::InstanceConstSharedPtr server_addr_;
-  EnvoyQuicClientConnection* quic_connection_{nullptr};
-  bool set_reuse_port_{false};
+
   const std::string injected_resource_filename_1_;
   const std::string injected_resource_filename_2_;
   AtomicFileUpdater file_updater_1_;
@@ -419,7 +313,7 @@ TEST_P(QuicHttpIntegrationTest, ConnectionMigration) {
   // Change to a new port by switching socket, and connection should still continue.
   Network::Address::InstanceConstSharedPtr local_addr =
       Network::Test::getCanonicalLoopbackAddress(version_);
-  quic_connection_->switchConnectionSocket(
+  static_cast<EnvoyQuicClientConnection*>(static_cast<EnvoyQuicClientSession*>(codec_client_->connection())->connection())->switchConnectionSocket(
       createConnectionSocket(server_addr_, local_addr, nullptr));
   EXPECT_NE(old_port, local_addr->ip()->port());
   // Send the rest data.
@@ -512,7 +406,7 @@ TEST_P(QuicHttpIntegrationTest, AdminDrainDrainsListeners) {
 }
 
 TEST_P(QuicHttpIntegrationTest, CertVerificationFailure) {
-  san_to_match_ = "www.random_domain.com";
+  quic_client_san_to_match_ = "www.random_domain.com";
   initialize();
   codec_client_ = makeRawHttpConnection(makeClientConnection((lookupPort("http"))), absl::nullopt);
   EXPECT_FALSE(codec_client_->connected());
@@ -523,6 +417,11 @@ TEST_P(QuicHttpIntegrationTest, CertVerificationFailure) {
           : "QUIC_HANDSHAKE_FAILED with details: TLS handshake failure (ENCRYPTION_HANDSHAKE) 46: "
             "certificate unknown";
   EXPECT_EQ(failure_reason, codec_client_->connection()->transportFailureReason());
+}
+
+TEST_P(QuicHttpIntegrationTest, RequestResponseWithTrailers) {
+  testTrailers(/*request_size=*/ 10, /*response_size=*/10, /*request_trailers_present=*/true,
+                    /*response_trailers_present=*/true);
 }
 
 } // namespace Quic

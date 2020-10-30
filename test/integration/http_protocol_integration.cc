@@ -20,10 +20,21 @@ std::vector<HttpProtocolTestParams> HttpProtocolIntegrationTest::getProtocolTest
 
 std::string HttpProtocolIntegrationTest::protocolTestParamsToString(
     const ::testing::TestParamInfo<HttpProtocolTestParams>& params) {
+  std::string downstream_protocol;
+  switch(params.param.downstream_protocol) {
+    case  Http::CodecClient::Type::HTTP1:
+      downstream_protocol = "HttpDownstream_";
+      break;
+    case  Http::CodecClient::Type::HTTP2:
+            downstream_protocol = "Http2Downstream_";
+      break;
+    case  Http::CodecClient::Type::HTTP3:
+            downstream_protocol = "Http3Downstream_";
+      break;
+  }
   return absl::StrCat(
       (params.param.version == Network::Address::IpVersion::v4 ? "IPv4_" : "IPv6_"),
-      (params.param.downstream_protocol == Http::CodecClient::Type::HTTP2 ? "Http2Downstream_"
-                                                                          : "HttpDownstream_"),
+      downstream_protocol,
       (params.param.upstream_protocol == FakeHttpConnection::Type::HTTP2 ? "Http2Upstream"
                                                                          : "HttpUpstream"));
 }

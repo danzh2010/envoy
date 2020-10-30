@@ -7,10 +7,12 @@
 #include <string>
 #include <vector>
 
+#include "base_integration_test.h"
 #include "envoy/buffer/buffer.h"
 #include "envoy/config/bootstrap/v3/bootstrap.pb.h"
 #include "envoy/event/dispatcher.h"
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
+#include "envoy/extensions/transport_sockets/quic/v3/quic_transport.pb.h"
 #include "envoy/http/header_map.h"
 #include "envoy/network/address.h"
 #include "envoy/registry/registry.h"
@@ -29,6 +31,13 @@
 #include "extensions/transport_sockets/tls/context_config_impl.h"
 #include "extensions/transport_sockets/tls/context_impl.h"
 #include "extensions/transport_sockets/tls/ssl_socket.h"
+#include "extensions/transport_sockets/tls/context_config_impl.h"
+
+#include "extensions/quic_listeners/quiche/envoy_quic_client_session.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_client_connection.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_proof_verifier.h"
+#include "extensions/quic_listeners/quiche/quic_transport_socket_factory.h"
+#include "test/extensions/quic_listeners/quiche/integration/test_utils.h"
 
 #include "test/common/upstream/utility.h"
 #include "test/integration/autonomous_upstream.h"
@@ -38,9 +47,22 @@
 #include "test/test_common/environment.h"
 #include "test/test_common/network_utility.h"
 #include "test/test_common/registry.h"
+#include "test/integration/ssl_utility.h"
 
 #include "absl/time/time.h"
 #include "gtest/gtest.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+
+#include "quiche/quic/core/quic_utils.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace Envoy {
 namespace {
@@ -209,6 +231,24 @@ void IntegrationCodecClient::ConnectionCallbacks::onEvent(Network::ConnectionEve
   }
 }
 
+Network::ClientConnectionPtr HttpIntegrationTest::makeClientConnectionWithOptions(
+      uint32_t port, const Network::ConnectionSocket::OptionsSharedPtr& options) {
+    if (downstream_protocol_ <= Http::CodecClient::Type::HTTP2) {
+      return BaseIntegrationTest::makeClientConnectionWithOptions(port, options);
+    }
+    // Setting socket options is not supported for HTTP3.
+    ASSERT(!options);
+    Network::Address::InstanceConstSharedPtr server_addr = Network::Utility::resolveUrl(
+        fmt::format("udp://{}:{}", Network::Test::getLoopbackAddressUrlString(version_), port));
+    Network::Address::InstanceConstSharedPtr local_addr =
+        Network::Test::getCanonicalLoopbackAddress(version_);
+    return Quic::TestUtils::makeClientConnection(*dispatcher_, server_addr, local_addr, getNextConnectionId(), conn_helper_, alarm_factory_, quic_config_, server_id_, *crypto_config_, push_promise_index_);
+  }
+
+quic::QuicConnectionId HttpIntegrationTest::getNextConnectionId() {
+      return quic::QuicUtils::CreateRandomConnectionId();
+  }
+
 IntegrationCodecClientPtr HttpIntegrationTest::makeHttpConnection(uint32_t port) {
   return makeHttpConnection(makeClientConnection(port));
 }
@@ -228,8 +268,16 @@ IntegrationCodecClientPtr HttpIntegrationTest::makeRawHttpConnection(
   cluster->http1_settings_.enable_trailers_ = true;
   Upstream::HostDescriptionConstSharedPtr host_description{Upstream::makeTestHostDescription(
       cluster, fmt::format("tcp://{}:80", Network::Test::getLoopbackAddressUrlString(version_)))};
-  return std::make_unique<IntegrationCodecClient>(*dispatcher_, random_, std::move(conn),
+   // This call may fail in QUICHE because of INVALID_VERSION. QUIC connection doesn't support
+  // in-connection version negotiation.
+  auto codec = std::make_unique<IntegrationCodecClient>(*dispatcher_, random_, std::move(conn),
                                                   host_description, downstream_protocol_);
+  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3 && codec->disconnected()) {
+      // Connection may get closed during version negotiation or handshake.
+      ENVOY_LOG(error, "Fail to connect to server with error: {}",
+                codec->connection()->transportFailureReason());
+  }
+  return codec;
 }
 
 Network::TransportSocketFactoryPtr HttpIntegrationTest::createUpstreamTlsContext() {
@@ -277,7 +325,10 @@ HttpIntegrationTest::HttpIntegrationTest(Http::CodecClient::Type downstream_prot
                                          Network::Address::IpVersion version,
                                          const std::string& config)
     : BaseIntegrationTest(upstream_address_fn, version, config),
-      downstream_protocol_(downstream_protocol) {
+      downstream_protocol_(downstream_protocol),
+      // Only run the highest currently supported QUIC version.
+       supported_versions_(quic::CurrentSupportedVersions()),
+        conn_helper_(*dispatcher_), alarm_factory_(*dispatcher_, *conn_helper_.GetClock()) {
   // Legacy integration tests expect the default listener to be named "http" for
   // lookupPort calls.
   config_helper_.renameListener("http");
@@ -290,6 +341,38 @@ void HttpIntegrationTest::useAccessLog(absl::string_view format) {
 }
 
 HttpIntegrationTest::~HttpIntegrationTest() { cleanupUpstreamAndDownstream(); }
+
+void HttpIntegrationTest::initialize() {
+     if (downstream_protocol_ != Http::CodecClient::Type::HTTP3) {
+       return BaseIntegrationTest::initialize();
+     }
+
+   config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+      envoy::extensions::transport_sockets::quic::v3::QuicDownstreamTransport
+          quic_transport_socket_config;
+      auto tls_context = quic_transport_socket_config.mutable_downstream_tls_context();
+      ConfigHelper::initializeTls(ConfigHelper::ServerSslOptions().setRsaCert(true).setTlsV13(true),
+                                  *tls_context->mutable_common_tls_context());
+      auto* filter_chain =
+          bootstrap.mutable_static_resources()->mutable_listeners(0)->mutable_filter_chains(0);
+      auto* transport_socket = filter_chain->mutable_transport_socket();
+      transport_socket->mutable_typed_config()->PackFrom(quic_transport_socket_config);
+
+      bootstrap.mutable_static_resources()->mutable_listeners(0)->set_reuse_port(set_reuse_port_);
+   });
+
+    config_helper_.addConfigModifier(
+        [](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
+               hcm) {
+          hcm.mutable_drain_timeout()->clear_seconds();
+          hcm.mutable_drain_timeout()->set_nanos(500 * 1000 * 1000);
+          EXPECT_EQ(hcm.codec_type(), envoy::extensions::filters::network::http_connection_manager::
+                                          v3::HttpConnectionManager::HTTP3);
+        });
+    BaseIntegrationTest::initialize();
+    registerTestServerPorts({"http"});
+    crypto_config_ = Quic::TestUtils::createQuicCryptoClientConfig(stats_store_, *api_, quic_client_san_to_match_, timeSystem());
+}
 
 void HttpIntegrationTest::setDownstreamProtocol(Http::CodecClient::Type downstream_protocol) {
   downstream_protocol_ = downstream_protocol;

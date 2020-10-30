@@ -12,6 +12,23 @@
 #include "test/integration/utility.h"
 #include "test/test_common/printers.h"
 
+#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+
+#include "quiche/quic/core/http/quic_client_push_promise_index.h"
+#include "quiche/quic/core/quic_server_id.h"
+#include "quiche/quic/core/crypto/quic_crypto_client_config.h"
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 namespace Envoy {
 
 using ::Envoy::Http::Http2::Http2Frame;
@@ -105,6 +122,8 @@ public:
                       const std::string& config = ConfigHelper::httpProxyConfig());
   ~HttpIntegrationTest() override;
 
+  void initialize() override;
+
 protected:
   void useAccessLog(absl::string_view format = "");
 
@@ -114,6 +133,9 @@ protected:
   virtual IntegrationCodecClientPtr makeRawHttpConnection(
       Network::ClientConnectionPtr&& conn,
       absl::optional<envoy::config::core::v3::Http2ProtocolOptions> http2_options);
+  // Makes a downstream network connection object based on client codec version.
+  Network::ClientConnectionPtr makeClientConnectionWithOptions(
+      uint32_t port, const Network::ConnectionSocket::OptionsSharedPtr& options) override;
   // Makes a http connection object with asserting a connected state.
   IntegrationCodecClientPtr makeHttpConnection(Network::ClientConnectionPtr&& conn);
 
@@ -236,6 +258,8 @@ protected:
   Http::CodecClient::Type downstreamProtocol() const { return downstream_protocol_; }
   // Prefix listener stat with IP:port, including IP version dependent loopback address.
   std::string listenerStatPrefix(const std::string& stat_name);
+  
+  virtual quic::QuicConnectionId getNextConnectionId();
 
   // The client making requests to Envoy.
   IntegrationCodecClientPtr codec_client_;
@@ -255,6 +279,17 @@ protected:
   uint32_t max_request_headers_count_{Http::DEFAULT_MAX_HEADERS_COUNT};
   std::string access_log_name_;
   testing::NiceMock<Random::MockRandomGenerator> random_;
+
+  bool set_reuse_port_{false};
+
+  quic::QuicConfig quic_config_;
+  quic::QuicServerId server_id_{"lyft.com", 443, false};
+  quic::QuicClientPushPromiseIndex push_promise_index_;
+  quic::ParsedQuicVersionVector supported_versions_;
+  std::unique_ptr<quic::QuicCryptoClientConfig> crypto_config_;
+  Quic::EnvoyQuicConnectionHelper conn_helper_;
+  Quic::EnvoyQuicAlarmFactory alarm_factory_;
+  std::string quic_client_san_to_match_{"spiffe://lyft.com/backend-team"};
 };
 
 // Helper class for integration tests using raw HTTP/2 frames

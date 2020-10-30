@@ -525,6 +525,11 @@ envoy_cc_test_library(
         "//source/extensions/filters/http/on_demand:config",
         "//source/extensions/filters/http/router:config",
         "//source/extensions/filters/network/http_connection_manager:config",
+        "//source/extensions/quic_listeners/quiche:active_quic_listener_config_lib",
+        "//source/extensions/quic_listeners/quiche:codec_lib",
+        "//source/extensions/quic_listeners/quiche:envoy_quic_connection_helper_lib",
+        "//test/extensions/quic_listeners/quiche/integration:test_utils_lib",
+        "//source/extensions/quic_listeners/quiche:quic_transport_socket_factory_lib",
         "//source/extensions/transport_sockets/tls:context_lib",
         "//test/common/http/http2:http2_frame",
         "//test/common/upstream:utility_lib",
@@ -541,6 +546,7 @@ envoy_cc_test_library(
         "//test/test_common:registry_lib",
         "@envoy_api//envoy/config/bootstrap/v3:pkg_cc_proto",
         "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/transport_sockets/quic/v3:pkg_cc_proto",
     ],
 )
 

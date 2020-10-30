@@ -54,6 +54,7 @@ CodecClient::~CodecClient() = default;
 void CodecClient::close() { connection_->close(Network::ConnectionCloseType::NoFlush); }
 
 void CodecClient::deleteRequest(ActiveRequest& request) {
+  std::cerr << "=========== Remove request " << &request << "\n";
   connection_->dispatcher().deferredDelete(request.removeFromList(active_requests_));
   if (codec_client_callbacks_) {
     codec_client_callbacks_->onStreamDestroy();
@@ -67,6 +68,7 @@ RequestEncoder& CodecClient::newStream(ResponseDecoder& response_decoder) {
   ActiveRequestPtr request(new ActiveRequest(*this, response_decoder));
   request->encoder_ = &codec_->newStream(*request);
   request->encoder_->getStream().addCallbacks(*request);
+  std::cerr << "================ newStream insert " << request.get()  << "\n";
   LinkedList::moveIntoList(std::move(request), active_requests_);
   disableIdleTimer();
   return *active_requests_.front()->encoder_;
