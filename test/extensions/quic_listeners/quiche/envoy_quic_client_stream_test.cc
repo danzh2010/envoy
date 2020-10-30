@@ -130,16 +130,9 @@ TEST_P(EnvoyQuicClientStreamTest, PostRequestAndResponse) {
   EXPECT_TRUE(quic_stream_->FinishedReadingHeaders());
 
   EXPECT_CALL(stream_decoder_, decodeData(_, _))
-      .Times(testing::AtMost(2))
       .WillOnce(Invoke([&](Buffer::Instance& buffer, bool finished_reading) {
         EXPECT_EQ(response_body_, buffer.toString());
         EXPECT_FALSE(finished_reading);
-      }))
-      // Depends on QUIC version, there may be an empty STREAM_FRAME with FIN. But
-      // since there is trailers, finished_reading should always be false.
-      .WillOnce(Invoke([](Buffer::Instance& buffer, bool finished_reading) {
-        EXPECT_FALSE(finished_reading);
-        EXPECT_EQ(0, buffer.length());
       }));
   std::string data = response_body_;
   if (quic::VersionUsesHttp3(quic_version_.transport_version)) {
@@ -159,7 +152,10 @@ TEST_P(EnvoyQuicClientStreamTest, PostRequestAndResponse) {
         EXPECT_EQ("value1", headers->get(key1)[0]->value().getStringView());
         EXPECT_TRUE(headers->get(key2).empty());
       }));
-  quic_stream_->OnStreamHeaderList(/*fin=*/true, trailers_.uncompressed_header_bytes(), trailers_);
+  quic_stream_->OnStreamHeaderList(/*fin=*/!quic::VersionUsesHttp3(quic_version_.transport_version), trailers_.uncompressed_header_bytes(), trailers_);
+  if (quic::VersionUsesHttp3(quic_version_.transport_version)) {
+  quic_stream_->OnStreamFrame(quic::QuicStreamFrame(stream_id_, true, data.length(), quiche::QuicheStringPiece()));
+  }
 }
 
 TEST_P(EnvoyQuicClientStreamTest, OutOfOrderTrailers) {

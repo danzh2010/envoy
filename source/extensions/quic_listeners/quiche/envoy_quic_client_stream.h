@@ -67,6 +67,9 @@ protected:
 private:
   QuicFilterManagerConnectionImpl* filterManagerConnection();
 
+  // Deliver awaiting trailers if body has been delivered.
+  void maybeDecodeTrailers();
+
   Http::ResponseDecoder* response_decoder_{nullptr};
 };
 

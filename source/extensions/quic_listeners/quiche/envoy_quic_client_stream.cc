@@ -22,6 +22,8 @@
 #include "common/http/header_map_impl.h"
 #include "common/common/assert.h"
 
+#include "server/backtrace.h"
+
 namespace Envoy {
 namespace Quic {
 
@@ -158,18 +160,18 @@ void EnvoyQuicClientStream::OnBodyAvailable() {
     buffer->commit(&slice, 1);
     MarkConsumed(bytes_read);
   }
+  ASSERT(buffer->length() == 0 || !end_stream_decoded_);
 
-  // True if no trailer and FIN read.
-  bool finished_reading = IsDoneReading();
-  bool empty_payload_with_fin = buffer->length() == 0 && fin_received();
+  bool fin_read_and_no_trailers = IsDoneReading();
   // If this call is triggered by an empty frame with FIN which is not from peer
   // but synthesized by stream itself upon receiving HEADERS with FIN or
   // TRAILERS, do not deliver end of stream here. Because either decodeHeaders
   // already delivered it or decodeTrailers will be called.
-  bool skip_decoding = empty_payload_with_fin && (end_stream_decoded_ || !finished_reading);
+  bool skip_decoding = (buffer->length() == 0 && !fin_read_and_no_trailers) || end_stream_decoded_;
   if (!skip_decoding) {
-    response_decoder_->decodeData(*buffer, finished_reading);
-    if (finished_reading) {
+    std::cerr << " ============ decode data fin_read_and_no_trailers = " << fin_read_and_no_trailers << " buffer length " << buffer->length() << "\n";
+    response_decoder_->decodeData(*buffer, fin_read_and_no_trailers);
+    if (fin_read_and_no_trailers) {
       end_stream_decoded_ = true;
     }
   }
@@ -184,29 +186,29 @@ void EnvoyQuicClientStream::OnBodyAvailable() {
     return;
   }
 
-  if (!quic::VersionUsesHttp3(transport_version()) && !FinishedReadingTrailers()) {
-    // For Google QUIC implementation, trailers may arrived earlier and wait to
-    // be consumed after reading all the body. Consume it here.
-    // IETF QUIC shouldn't reach here because trailers are sent on same stream.
-    response_decoder_->decodeTrailers(
-        spdyHeaderBlockToEnvoyHeaders<Http::ResponseTrailerMapImpl>(received_trailers()));
-    MarkTrailersConsumed();
-  }
-  OnFinRead();
+    // Trailers may arrived earlier and wait to be consumed after reading all the body. Consume it here.
+    maybeDecodeTrailers();
+
+    OnFinRead();
   in_decode_data_callstack_ = false;
 }
 
 void EnvoyQuicClientStream::OnTrailingHeadersComplete(bool fin, size_t frame_len,
                                                       const quic::QuicHeaderList& header_list) {
+  std::cerr << "============ OnTrailingHeadersComplete\n";
   quic::QuicSpdyStream::OnTrailingHeadersComplete(fin, frame_len, header_list);
   ASSERT(trailers_decompressed());
-  if (session()->connection()->connected() &&
-      (quic::VersionUsesHttp3(transport_version()) || sequencer()->IsClosed()) &&
-      !FinishedReadingTrailers()) {
-    // Before QPack, trailers can arrive before body. Only decode trailers after finishing decoding
-    // body.
+  if (session()->connection()->connected()) {
+    maybeDecodeTrailers();
+     }
+}
+
+void EnvoyQuicClientStream::maybeDecodeTrailers() {
+  if (sequencer()->IsClosed() && !FinishedReadingTrailers()) {
+    // Only decode trailers after finishing decoding body.
     response_decoder_->decodeTrailers(
         spdyHeaderBlockToEnvoyHeaders<Http::ResponseTrailerMapImpl>(received_trailers()));
+    end_stream_decoded_ = true;
     MarkTrailersConsumed();
   }
 }
