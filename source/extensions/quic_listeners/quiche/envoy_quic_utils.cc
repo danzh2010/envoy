@@ -4,6 +4,7 @@
 #include "envoy/config/core/v3/base.pb.h"
 
 #include "common/network/socket_option_factory.h"
+#include "common/network/utility.h"
 
 namespace Envoy {
 namespace Quic {
@@ -54,7 +55,8 @@ spdy::SpdyHeaderBlock envoyHeadersToSpdyHeaderBlock(const Http::HeaderMap& heade
   spdy::SpdyHeaderBlock header_block;
   headers.iterate([&header_block](const Http::HeaderEntry& header) -> Http::HeaderMap::Iterate {
     // The key-value pairs are copied.
-    header_block.insert({header.key().getStringView(), header.value().getStringView()});
+    header_block.AppendValueOrAddHeader(header.key().getStringView(),
+                                        header.value().getStringView());
     return Http::HeaderMap::Iterate::Continue;
   });
   return header_block;
@@ -97,7 +99,7 @@ Http::StreamResetReason quicRstErrorToEnvoyRemoteResetReason(quic::QuicRstStream
 }
 
 Http::StreamResetReason quicErrorCodeToEnvoyResetReason(quic::QuicErrorCode error) {
-  if (error == quic::QUIC_NO_ERROR) {
+  if (error == quic::QUIC_CONNECTION_CANCELLED) {
     return Http::StreamResetReason::ConnectionTermination;
   } else {
     return Http::StreamResetReason::ConnectionFailure;
@@ -106,7 +108,7 @@ Http::StreamResetReason quicErrorCodeToEnvoyResetReason(quic::QuicErrorCode erro
 
 Http::GoAwayErrorCode quicErrorCodeToEnvoyErrorCode(quic::QuicErrorCode error) noexcept {
   switch (error) {
-  case quic::QUIC_NO_ERROR:
+  case quic::QUIC_PEER_GOING_AWAY:
     return Http::GoAwayErrorCode::NoError;
   default:
     return Http::GoAwayErrorCode::Other;
@@ -117,6 +119,13 @@ Network::ConnectionSocketPtr
 createConnectionSocket(Network::Address::InstanceConstSharedPtr& peer_addr,
                        Network::Address::InstanceConstSharedPtr& local_addr,
                        const Network::ConnectionSocket::OptionsSharedPtr& options) {
+  if (local_addr == nullptr) {
+    if (peer_addr->ip()->ipv4() != nullptr) {
+      local_addr = Network::Utility::getCanonicalIpv4LoopbackAddress();
+    } else {
+      local_addr = Network::Utility::getIpv6LoopbackAddress();
+    }
+  }
   auto connection_socket = std::make_unique<Network::ConnectionSocketImpl>(
       Network::Socket::Type::Datagram, local_addr, peer_addr);
   connection_socket->addOptions(Network::SocketOptionFactory::buildIpPacketInfoOptions());

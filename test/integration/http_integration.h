@@ -7,13 +7,13 @@
 #include "common/http/codec_client.h"
 #include "common/network/filter_impl.h"
 
+#include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
+
 #include "test/common/http/http2/http2_frame.h"
 #include "test/integration/integration.h"
 #include "test/integration/utility.h"
 #include "test/test_common/printers.h"
-
-#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -258,7 +258,7 @@ protected:
   Http::CodecClient::Type downstreamProtocol() const { return downstream_protocol_; }
   // Prefix listener stat with IP:port, including IP version dependent loopback address.
   std::string listenerStatPrefix(const std::string& stat_name);
-  
+
   virtual quic::QuicConnectionId getNextConnectionId();
 
   // The client making requests to Envoy.

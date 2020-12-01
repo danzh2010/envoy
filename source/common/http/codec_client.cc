@@ -68,7 +68,7 @@ RequestEncoder& CodecClient::newStream(ResponseDecoder& response_decoder) {
   ActiveRequestPtr request(new ActiveRequest(*this, response_decoder));
   request->encoder_ = &codec_->newStream(*request);
   request->encoder_->getStream().addCallbacks(*request);
-  std::cerr << "================ newStream insert " << request.get()  << "\n";
+  std::cerr << "================ newStream insert " << request.get() << "\n";
   LinkedList::moveIntoList(std::move(request), active_requests_);
   disableIdleTimer();
   return *active_requests_.front()->encoder_;
@@ -172,7 +172,8 @@ CodecClientProd::CodecClientProd(Type type, Network::ClientConnectionPtr&& conne
     codec_ = std::unique_ptr<ClientConnection>(
         Config::Utility::getAndCheckFactoryByName<Http::QuicHttpClientConnectionFactory>(
             Http::QuicCodecNames::get().Quiche)
-            .createQuicClientConnection(*connection_, *this));
+            .createQuicClientConnection(*connection_, *this, Http::DEFAULT_MAX_REQUEST_HEADERS_KB,
+                                        host->cluster().maxResponseHeadersCount()));
     break;
   }
   }

@@ -358,12 +358,13 @@ bool HeaderMapImpl::operator!=(const HeaderMap& rhs) const { return !operator==(
 void HeaderMapImpl::insertByKey(HeaderString&& key, HeaderString&& value) {
   auto lookup = staticLookup(key.getStringView());
   if (lookup.has_value()) {
+    const std::string delimiter = (key == Http::Headers::get().Cookie.get() ? "; " : ",");
     key.clear();
     if (*lookup.value().entry_ == nullptr) {
       maybeCreateInline(lookup.value().entry_, *lookup.value().key_, std::move(value));
     } else {
       const uint64_t added_size =
-          appendToHeader((*lookup.value().entry_)->value(), value.getStringView());
+          appendToHeader((*lookup.value().entry_)->value(), value.getStringView(), delimiter);
       addSize(added_size);
       value.clear();
     }

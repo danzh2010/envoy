@@ -1,11 +1,13 @@
-#include "envoy/network/address.h"
 #include "envoy/event/dispatcher.h"
-#include "extensions/quic_listeners/quiche/quic_transport_socket_factory.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
+#include "envoy/network/address.h"
+
 #include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
+#include "extensions/quic_listeners/quiche/quic_transport_socket_factory.h"
+
+#include "test/integration/ssl_utility.h"
 #include "test/integration/utility.h"
 #include "test/mocks/server/transport_socket_factory_context.h"
-#include "test/integration/ssl_utility.h"
 #include "test/test_common/network_utility.h"
 
 #if defined(__GNUC__)
@@ -39,7 +41,8 @@ public:
   // Initiate a QUIC connection with the highest supported version. If not
   // supported by server, this connection will fail.
   static Network::ClientConnectionPtr
-  makeClientConnection(Event::Dispatcher& dispatcher,
+  makeClientConnection(const quic::ParsedQuicVersionVector& supported_versions,
+                       Event::Dispatcher& dispatcher,
                        Network::Address::InstanceConstSharedPtr& server_addr,
                        Network::Address::InstanceConstSharedPtr& client_addr,
                        quic::QuicConnectionId conn_id, Quic::EnvoyQuicConnectionHelper& conn_helper,
@@ -49,13 +52,13 @@ public:
 
   static BufferingStreamDecoderPtr
   makeSingleHttp3Request(uint32_t port, const std::string& method, const std::string& url,
-                                   const std::string& body,                                    Network::Address::IpVersion ip_version, const std::string& host,
-                                   const std::string& content_type = "");
+                         const std::string& body, Network::Address::IpVersion ip_version,
+                         const std::string& host = "host", const std::string& content_type = "");
 
   static BufferingStreamDecoderPtr
-  makeSingleHttp3Request(Network::Address::InstanceConstSharedPtr& addr,
-                         const std::string& method, const std::string& url, const std::string& body,
-                         const std::string& host, const std::string& content_type);
+  makeSingleHttp3Request(Network::Address::InstanceConstSharedPtr& addr, const std::string& method,
+                         const std::string& url, const std::string& body, const std::string& host,
+                         const std::string& content_type);
 };
 
 } // namespace Quic

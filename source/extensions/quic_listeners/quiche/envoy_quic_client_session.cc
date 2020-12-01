@@ -13,7 +13,14 @@ EnvoyQuicClientSession::EnvoyQuicClientSession(
     uint32_t send_buffer_limit)
     : QuicFilterManagerConnectionImpl(*connection, dispatcher, send_buffer_limit),
       quic::QuicSpdyClientSession(config, supported_versions, connection.release(), server_id,
-                                  crypto_config, push_promise_index) {}
+                                  crypto_config, push_promise_index) {
+  // QUICHE requires this to be set before Initialize() but the configured
+  // value in Envoy is only accessible after retrieving filter chain
+  // during the handshake which is after Initialize().
+  // TODO(danzh) Change QUICHE to set this field after handshake and use the configurable value from
+  // HttpConnectionManagerConfig::maxRequestHeadersKb().
+  set_max_inbound_header_list_size(Http::DEFAULT_MAX_REQUEST_HEADERS_KB * 1024);
+}
 
 EnvoyQuicClientSession::~EnvoyQuicClientSession() {
   ASSERT(!connection()->connected());

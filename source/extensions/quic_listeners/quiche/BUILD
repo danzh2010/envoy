@@ -41,7 +41,7 @@ envoy_cc_library(
     name = "envoy_quic_connection_helper_lib",
     hdrs = ["envoy_quic_connection_helper.h"],
     tags = ["nofips"],
-         visibility = ["//test:__subpackages__"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         "//source/extensions/quic_listeners/quiche/platform:envoy_quic_clock_lib",
         "@com_googlesource_quiche//:quic_core_buffer_allocator_lib",
@@ -104,7 +104,7 @@ envoy_cc_library(
     hdrs = ["envoy_quic_proof_verifier.h"],
     external_deps = ["quiche_quic_platform"],
     tags = ["nofips"],
-         visibility = ["//test:__subpackages__"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_proof_verifier_base_lib",
         ":envoy_quic_utils_lib",
@@ -129,7 +129,7 @@ envoy_cc_library(
     tags = ["nofips"],
     deps = [
         ":envoy_quic_simulated_watermark_buffer_lib",
-        ":quic_filter_manager_connection_lib",
+        ":envoy_quic_utils_lib",
         "//include/envoy/event:dispatcher_interface",
         "//include/envoy/http:codec_interface",
         "//source/common/http:codec_helper_lib",
@@ -141,7 +141,7 @@ envoy_cc_library(
     srcs = ["codec_impl.cc"],
     hdrs = ["codec_impl.h"],
     tags = ["nofips"],
-         visibility = ["//test:__subpackages__"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_client_session_lib",
         ":envoy_quic_server_session_lib",
@@ -158,6 +158,7 @@ envoy_cc_library(
     srcs = ["quic_filter_manager_connection_impl.cc"],
     hdrs = ["quic_filter_manager_connection_impl.h"],
     tags = ["nofips"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_connection_lib",
         ":envoy_quic_simulated_watermark_buffer_lib",
@@ -207,7 +208,7 @@ envoy_cc_library(
         "envoy_quic_client_stream.h",
     ],
     tags = ["nofips"],
-         visibility = ["//test:__subpackages__"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_client_connection_lib",
         ":envoy_quic_stream_lib",
@@ -262,7 +263,7 @@ envoy_cc_library(
     srcs = ["envoy_quic_client_connection.cc"],
     hdrs = ["envoy_quic_client_connection.h"],
     tags = ["nofips"],
-         visibility = ["//test:__subpackages__"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_connection_lib",
         ":envoy_quic_packet_writer_lib",
@@ -358,7 +359,7 @@ envoy_cc_library(
     srcs = ["quic_transport_socket_factory.cc"],
     hdrs = ["quic_transport_socket_factory.h"],
     tags = ["nofips"],
-        visibility = ["//test:__subpackages__"],
+    visibility = ["//test:__subpackages__"],
     deps = [
         "//include/envoy/network:transport_socket_interface",
         "//include/envoy/server:transport_socket_config_interface",

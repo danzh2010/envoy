@@ -4,6 +4,8 @@
 
 #include "common/network/utility.h"
 
+#include "server/backtrace.h"
+
 #include "extensions/quic_listeners/quiche/envoy_quic_connection.h"
 
 namespace Envoy {
@@ -42,6 +44,11 @@ public:
 
   // Switch underlying socket with the given one. This is used in connection migration.
   void switchConnectionSocket(Network::ConnectionSocketPtr&& connection_socket);
+
+  const quic::QuicFrames MaybeBundleAckOpportunistically() override {
+    // BACKTRACE_LOG();
+    return quic::QuicConnection::MaybeBundleAckOpportunistically();
+  }
 
 private:
   EnvoyQuicClientConnection(const quic::QuicConnectionId& server_connection_id,

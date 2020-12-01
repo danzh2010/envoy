@@ -72,7 +72,7 @@ Http::Status EnvoyQuicClientStream::encodeHeaders(const Http::RequestHeaderMap& 
     // https://tools.ietf.org/html/draft-kinnear-httpbis-http2-transport-02
     spdy_headers[":protocol"] = Http::Headers::get().ProtocolValues.Bytestream;
     if (!headers.Path()) {
-      spdy_headers[":path"]= "/";
+      spdy_headers[":path"] = "/";
     }
   }
   WriteHeaders(std::move(spdy_headers), end_stream, nullptr);
@@ -159,30 +159,35 @@ void EnvoyQuicClientStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
     end_stream_decoded_ = true;
   }
   bool close_connection_upon_invalid_header;
-  std::unique_ptr<Http::ResponseHeaderMapImpl> headers = quicHeadersToEnvoyHeaders<Http::ResponseHeaderMapImpl>(header_list, [this, &close_connection_upon_invalid_header](const std::string& header_name, absl::string_view header_value){
+  std::unique_ptr<Http::ResponseHeaderMapImpl> headers = quicHeadersToEnvoyHeaders<
+      Http::ResponseHeaderMapImpl>(header_list, [this, &close_connection_upon_invalid_header](
+                                                    const std::string& header_name,
+                                                    absl::string_view header_value) {
     if (header_name == "content-length") {
-      std::vector<absl::string_view> values =
-        absl::StrSplit(header_value, ',');
+      std::vector<absl::string_view> values = absl::StrSplit(header_value, ',');
       absl::optional<uint64_t> content_length;
-    for (const absl::string_view& value : values) {
-      uint64_t new_value;
-      if (!absl::SimpleAtoi(value, &new_value) ||
-          !quiche::QuicheTextUtils::IsAllDigits(value)) {
-        ENVOY_STREAM_LOG(debug, "Content length was either unparseable or negative", *this);
-        // TODO(danzh) set value according to override_stream_error_on_invalid_http_message from configured http2 options.
-        close_connection_upon_invalid_header = true;
-        return HeaderValidationResult::INVALID;
+      for (const absl::string_view& value : values) {
+        uint64_t new_value;
+        if (!absl::SimpleAtoi(value, &new_value) || !quiche::QuicheTextUtils::IsAllDigits(value)) {
+          ENVOY_STREAM_LOG(debug, "Content length was either unparseable or negative", *this);
+          // TODO(danzh) set value according to override_stream_error_on_invalid_http_message from
+          // configured http2 options.
+          close_connection_upon_invalid_header = true;
+          return HeaderValidationResult::INVALID;
+        }
+        if (!content_length.has_value()) {
+          content_length = new_value;
+          continue;
+        }
+        if (new_value != content_length.value()) {
+          ENVOY_STREAM_LOG(
+              debug,
+              "Parsed content length {} is inconsistent with previously detected content length {}",
+              *this, new_value, content_length.value());
+          close_connection_upon_invalid_header = false;
+          return HeaderValidationResult::INVALID;
+        }
       }
-      if (!content_length.has_value()) {
-        content_length = new_value;
-        continue;
-      }
-      if (new_value != content_length.value()) {
-        ENVOY_STREAM_LOG(debug, "Parsed content length {} is inconsistent with previously detected content length {}", *this, new_value, content_length.value());
-close_connection_upon_invalid_header = false;
-        return HeaderValidationResult::INVALID;
-      }
-    }
     }
     return HeaderValidationResult::ACCEPT;
   });
@@ -192,19 +197,18 @@ close_connection_upon_invalid_header = false;
   }
 
   const uint64_t status = Http::Utility::getResponseStatus(*headers);
- if (status >= 100 && status < 200) {
+  if (status >= 100 && status < 200) {
     // These are Informational 1xx headers, not the actual response headers.
-    ENVOY_STREAM_LOG(debug,  "Received informational response code: {}", *this, status);
+    ENVOY_STREAM_LOG(debug, "Received informational response code: {}", *this, status);
     set_headers_decompressed(false);
     if (status == 100 && !decoded_100_continue_) {
       // This is 100 Continue, only decode it once to support Expect:100-Continue header.
       decoded_100_continue_ = true;
-    response_decoder_->decode100ContinueHeaders(std::move(headers));
+      response_decoder_->decode100ContinueHeaders(std::move(headers));
     }
- } else {
-  response_decoder_->decodeHeaders(
-     std::move(headers),
-      /*end_stream=*/fin);
+  } else {
+    response_decoder_->decodeHeaders(std::move(headers),
+                                     /*end_stream=*/fin);
   }
 
   ConsumeHeaderList();
@@ -241,13 +245,12 @@ void EnvoyQuicClientStream::OnBodyAvailable() {
   // already delivered it or decodeTrailers will be called.
   bool skip_decoding = (buffer->length() == 0 && !fin_read_and_no_trailers) || end_stream_decoded_;
   if (!skip_decoding) {
-    std::cerr << " ============ decode data fin_read_and_no_trailers = " << fin_read_and_no_trailers << " buffer length " << buffer->length() << "\n";
+    std::cerr << " ============ decode data fin_read_and_no_trailers = " << fin_read_and_no_trailers
+              << " buffer length " << buffer->length() << "\n";
     if (fin_read_and_no_trailers) {
       end_stream_decoded_ = true;
     }
     response_decoder_->decodeData(*buffer, fin_read_and_no_trailers);
-
-
   }
 
   if (!sequencer()->IsClosed()) {
@@ -270,7 +273,6 @@ void EnvoyQuicClientStream::OnBodyAvailable() {
 
 void EnvoyQuicClientStream::OnTrailingHeadersComplete(bool fin, size_t frame_len,
                                                       const quic::QuicHeaderList& header_list) {
-  std::cerr << "============ OnTrailingHeadersComplete\n";
   if (rst_sent()) {
     return;
   }
@@ -309,7 +311,7 @@ void EnvoyQuicClientStream::OnConnectionClosed(quic::QuicErrorCode error,
                                                quic::ConnectionCloseSource source) {
   quic::QuicSpdyClientStream::OnConnectionClosed(error, source);
   if (!end_stream_decoded_) {
-  runResetCallbacks(Http::StreamResetReason::ConnectionTermination);
+    runResetCallbacks(Http::StreamResetReason::ConnectionTermination);
   }
 }
 

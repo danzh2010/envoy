@@ -13,6 +13,7 @@
 #endif
 
 #include "extensions/quic_listeners/quiche/envoy_quic_stream.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_utils.h"
 
 namespace Envoy {
 namespace Quic {
@@ -23,10 +24,15 @@ class EnvoyQuicServerStream : public quic::QuicSpdyServerStreamBase,
                               public Http::ResponseEncoder {
 public:
   EnvoyQuicServerStream(quic::QuicStreamId id, quic::QuicSpdySession* session,
-                        quic::StreamType type);
+                        quic::StreamType type,
+
+                        envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+                            headers_with_underscores_action);
 
   EnvoyQuicServerStream(quic::PendingStream* pending, quic::QuicSpdySession* session,
-                        quic::StreamType type);
+                        quic::StreamType type,
+                        envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+                            headers_with_underscores_action);
 
   void setRequestDecoder(Http::RequestDecoder& decoder) { request_decoder_ = &decoder; }
 
@@ -66,17 +72,19 @@ protected:
                                 const quic::QuicHeaderList& header_list) override;
   void OnTrailingHeadersComplete(bool fin, size_t frame_len,
                                  const quic::QuicHeaderList& header_list) override;
+  void OnHeadersTooLarge() override;
 
 private:
   QuicFilterManagerConnectionImpl* filterManagerConnection();
-  
-  // Deliver awaiting trailers if body has been delivered.
-  void maybeDecodeTrailers();
+
+  HeaderValidationResult checkHeaderNameForUnderscores(const std::string& header_name);
 
   // Deliver awaiting trailers if body has been delivered.
   void maybeDecodeTrailers();
 
   Http::RequestDecoder* request_decoder_{nullptr};
+  envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+      headers_with_underscores_action_;
 };
 
 } // namespace Quic

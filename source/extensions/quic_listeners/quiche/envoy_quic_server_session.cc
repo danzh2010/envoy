@@ -19,7 +19,14 @@ EnvoyQuicServerSession::EnvoyQuicServerSession(
     : quic::QuicServerSessionBase(config, supported_versions, connection.get(), visitor, helper,
                                   crypto_config, compressed_certs_cache),
       QuicFilterManagerConnectionImpl(*connection, dispatcher, send_buffer_limit),
-      quic_connection_(std::move(connection)), listener_config_(listener_config) {}
+      quic_connection_(std::move(connection)), listener_config_(listener_config) {
+  // QUICHE requires this to be set before Initialize() but the configured
+  // value in Envoy is only accessible after retrieving filter chain
+  // during the handshake which is after Initialize().
+  // TODO(danzh) Change QUICHE to set this field in OverrideQuicConfigDefaults() according to the
+  // configurable value from HttpConnectionManagerConfig::maxRequestHeadersKb().
+  set_max_inbound_header_list_size(15 * Http::DEFAULT_MAX_REQUEST_HEADERS_KB * 1024);
+}
 
 EnvoyQuicServerSession::~EnvoyQuicServerSession() {
   ASSERT(!quic_connection_->connected());
@@ -41,7 +48,8 @@ quic::QuicSpdyStream* EnvoyQuicServerSession::CreateIncomingStream(quic::QuicStr
   if (!ShouldCreateIncomingStream(id)) {
     return nullptr;
   }
-  auto stream = new EnvoyQuicServerStream(id, this, quic::BIDIRECTIONAL);
+  auto stream =
+      new EnvoyQuicServerStream(id, this, quic::BIDIRECTIONAL, headers_with_underscores_action_);
   ActivateStream(absl::WrapUnique(stream));
   setUpRequestDecoder(*stream);
   if (aboveHighWatermark()) {

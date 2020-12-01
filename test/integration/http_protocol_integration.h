@@ -41,7 +41,8 @@ public:
   // Address combinations are propagated from TestEnvironment::getIpVersionsForTest()
   static std::vector<HttpProtocolTestParams>
   getProtocolTestParams(const std::vector<Http::CodecClient::Type>& downstream_protocols =
-                            {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2, Http::CodecClient::Type::HTTP3},
+                            {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2,
+                             Http::CodecClient::Type::HTTP3},
                         const std::vector<FakeHttpConnection::Type>& upstream_protocols = {
                             FakeHttpConnection::Type::HTTP1, FakeHttpConnection::Type::HTTP2});
 
@@ -51,7 +52,10 @@ public:
   protocolTestParamsToString(const ::testing::TestParamInfo<HttpProtocolTestParams>& p);
 
   HttpProtocolIntegrationTest()
-      : HttpIntegrationTest(GetParam().downstream_protocol, GetParam().version, GetParam().downstream_protocol == Http::CodecClient::Type::HTTP3 ? ConfigHelper::quicHttpProxyConfig() :ConfigHelper::httpProxyConfig()) {}
+      : HttpIntegrationTest(GetParam().downstream_protocol, GetParam().version,
+                            GetParam().downstream_protocol == Http::CodecClient::Type::HTTP3
+                                ? ConfigHelper::quicHttpProxyConfig()
+                                : ConfigHelper::httpProxyConfig()) {}
 
   void SetUp() override {
     setDownstreamProtocol(GetParam().downstream_protocol);

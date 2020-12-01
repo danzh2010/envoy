@@ -40,7 +40,7 @@ public:
   // Invalid HTTP header field was received and stream is going to be
   // closed.
   static constexpr absl::string_view invalid_http_header = "http3.invalid.header.field";
-// The size of headers (or trailers) exceeded the configured limits.
+  // The size of headers (or trailers) exceeded the configured limits.
   static constexpr absl::string_view headers_too_large = "http3.headers_too_large";
   // Envoy was configured to drop requests with header keys beginning with underscores.
   static constexpr absl::string_view invalid_underscore = "http3.unexpected_underscore";
@@ -48,11 +48,11 @@ public:
   static constexpr absl::string_view remote_refused = "http3.remote_refuse";
   // The peer reset the stream.
   static constexpr absl::string_view remote_reset = "http3.remote_reset";
-
 };
 
-EnvoyQuicServerStream::EnvoyQuicServerStream(quic::QuicStreamId id, quic::QuicSpdySession* session,
-                                             quic::StreamType type,                          envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+EnvoyQuicServerStream::EnvoyQuicServerStream(
+    quic::QuicStreamId id, quic::QuicSpdySession* session, quic::StreamType type,
+    envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
         headers_with_underscores_action)
     : quic::QuicSpdyServerStreamBase(id, session, type),
       EnvoyQuicStream(
@@ -63,11 +63,11 @@ EnvoyQuicServerStream::EnvoyQuicServerStream(quic::QuicStreamId id, quic::QuicSp
           // but not fully depends on that.
           16 * 1024, [this]() { runLowWatermarkCallbacks(); },
           [this]() { runHighWatermarkCallbacks(); }),
-          headers_with_underscores_action_(headers_with_underscores_action) {}
+      headers_with_underscores_action_(headers_with_underscores_action) {}
 
-EnvoyQuicServerStream::EnvoyQuicServerStream(quic::PendingStream* pending,
-                                             quic::QuicSpdySession* session, quic::StreamType type,
-                         envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+EnvoyQuicServerStream::EnvoyQuicServerStream(
+    quic::PendingStream* pending, quic::QuicSpdySession* session, quic::StreamType type,
+    envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
         headers_with_underscores_action)
     : quic::QuicSpdyServerStreamBase(pending, session, type),
       EnvoyQuicStream(
@@ -75,8 +75,8 @@ EnvoyQuicServerStream::EnvoyQuicServerStream(quic::PendingStream* pending,
           // window. And no larger than the max stream flow control window for
           // the stream to buffer all the data.
           16 * 1024, [this]() { runLowWatermarkCallbacks(); },
-          [this]() { runHighWatermarkCallbacks(); }), 
-          headers_with_underscores_action_(headers_with_underscores_action){}
+          [this]() { runHighWatermarkCallbacks(); }),
+      headers_with_underscores_action_(headers_with_underscores_action) {}
 
 void EnvoyQuicServerStream::encode100ContinueHeaders(const Http::ResponseHeaderMap& headers) {
   ASSERT(headers.Status()->value() == "100");
@@ -156,8 +156,8 @@ void EnvoyQuicServerStream::resetStream(Http::StreamResetReason reason) {
     // of propagating original reset reason. In QUICHE if a stream stops reading
     // before FIN or RESET received, it resets the steam with QUIC_STREAM_NO_ERROR.
 
-      // Upper layers expect calling resetStream() to immediately raise reset callbacks.
-  runResetCallbacks(reason);
+    // Upper layers expect calling resetStream() to immediately raise reset callbacks.
+    runResetCallbacks(reason);
     StopReading();
   } else {
     Reset(envoyResetReasonToQuicRstError(reason));
@@ -186,25 +186,28 @@ void EnvoyQuicServerStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
   ASSERT(headers_decompressed() && !header_list.empty());
   std::cerr << "============ decodeHeaders\n";
   bool close_connection_upon_invalid_header{false};
-  
-  std::unique_ptr<Http::RequestHeaderMapImpl> headers = quicHeadersToEnvoyHeaders<Http::RequestHeaderMapImpl>(header_list, [this, &close_connection_upon_invalid_header](const std::string& header_name, absl::string_view header_value){
+
+  std::unique_ptr<Http::RequestHeaderMapImpl> headers = quicHeadersToEnvoyHeaders<
+      Http::RequestHeaderMapImpl>(header_list, [this, &close_connection_upon_invalid_header](
+                                                   const std::string& header_name,
+                                                   absl::string_view header_value) {
     if (header_name[0] == ':') {
       bool is_valid_header{false};
       for (auto legal_header : {":method", ":scheme", ":authority", ":path"}) {
-      if (header_name == legal_header){
-        is_valid_header = true;
-        break;
-      }
+        if (header_name == legal_header) {
+          is_valid_header = true;
+          break;
+        }
       }
       if (!is_valid_header) {
         ENVOY_STREAM_LOG(debug, "Invalid request header {}", *this, header_name);
-      close_connection_upon_invalid_header = true;
-      setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
-      return HeaderValidationResult::INVALID;
+        close_connection_upon_invalid_header = true;
+        setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
+        return HeaderValidationResult::INVALID;
       }
     }
     if (header_name == ":authority" && !Http::HeaderUtility::authorityIsValid(header_value)) {
-       close_connection_upon_invalid_header = true;
+      close_connection_upon_invalid_header = true;
       setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
       return HeaderValidationResult::INVALID;
     }
@@ -212,34 +215,36 @@ void EnvoyQuicServerStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
     if (result != HeaderValidationResult::ACCEPT) {
       close_connection_upon_invalid_header = false;
       setDetails(Http3ResponseCodeDetailValues::invalid_underscore);
-    return result;
+      return result;
     }
 
     if (header_name == "content-length") {
-      std::vector<absl::string_view> values =
-        absl::StrSplit(header_value, ',');
+      std::vector<absl::string_view> values = absl::StrSplit(header_value, ',');
       absl::optional<uint64_t> content_length;
-    for (const absl::string_view& value : values) {
-      uint64_t new_value;
-      if (!absl::SimpleAtoi(value, &new_value) ||
-          !quiche::QuicheTextUtils::IsAllDigits(value)) {
-        ENVOY_STREAM_LOG(debug, "Content length was either unparseable or negative", *this);
-        // TODO(danzh) set value according to override_stream_error_on_invalid_http_message from configured http2 options.
-        close_connection_upon_invalid_header = true;
-        setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
-        return HeaderValidationResult::INVALID;
+      for (const absl::string_view& value : values) {
+        uint64_t new_value;
+        if (!absl::SimpleAtoi(value, &new_value) || !quiche::QuicheTextUtils::IsAllDigits(value)) {
+          ENVOY_STREAM_LOG(debug, "Content length was either unparseable or negative", *this);
+          // TODO(danzh) set value according to override_stream_error_on_invalid_http_message from
+          // configured http2 options.
+          close_connection_upon_invalid_header = true;
+          setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
+          return HeaderValidationResult::INVALID;
+        }
+        if (!content_length.has_value()) {
+          content_length = new_value;
+          continue;
+        }
+        if (new_value != content_length.value()) {
+          ENVOY_STREAM_LOG(
+              debug,
+              "Parsed content length {} is inconsistent with previously detected content length {}",
+              *this, new_value, content_length.value());
+          close_connection_upon_invalid_header = false;
+          setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
+          return HeaderValidationResult::INVALID;
+        }
       }
-      if (!content_length.has_value()) {
-        content_length = new_value;
-        continue;
-      }
-      if (new_value != content_length.value()) {
-        ENVOY_STREAM_LOG(debug, "Parsed content length {} is inconsistent with previously detected content length {}", *this, new_value, content_length.value());
-close_connection_upon_invalid_header = false;
-        setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
-        return HeaderValidationResult::INVALID;
-      }
-    }
     }
     return HeaderValidationResult::ACCEPT;
   });
@@ -247,16 +252,15 @@ close_connection_upon_invalid_header = false;
     if (close_connection_upon_invalid_header) {
       stream_delegate()->OnStreamError(quic::QUIC_HTTP_FRAME_ERROR, "Invalid headers");
     } else {
-    Reset(quic::QUIC_BAD_APPLICATION_PAYLOAD);
+      Reset(quic::QUIC_BAD_APPLICATION_PAYLOAD);
     }
     return;
   }
   if (fin) {
     end_stream_decoded_ = true;
   }
-  request_decoder_->decodeHeaders(
-      std::move(headers),
-      /*end_stream=*/fin);
+  request_decoder_->decodeHeaders(std::move(headers),
+                                  /*end_stream=*/fin);
   ConsumeHeaderList();
 }
 
@@ -319,7 +323,7 @@ void EnvoyQuicServerStream::OnBodyAvailable() {
 
 void EnvoyQuicServerStream::OnTrailingHeadersComplete(bool fin, size_t frame_len,
                                                       const quic::QuicHeaderList& header_list) {
-    if (rst_sent()) {
+  if (rst_sent()) {
     return;
   }
   quic::QuicSpdyServerStreamBase::OnTrailingHeadersComplete(fin, frame_len, header_list);
@@ -330,7 +334,7 @@ void EnvoyQuicServerStream::OnTrailingHeadersComplete(bool fin, size_t frame_len
 }
 
 void EnvoyQuicServerStream::OnHeadersTooLarge() {
- ENVOY_STREAM_LOG(debug, "Headers too large.", *this);
+  ENVOY_STREAM_LOG(debug, "Headers too large.", *this);
   setDetails(Http3ResponseCodeDetailValues::headers_too_large);
   quic::QuicSpdyServerStreamBase::OnHeadersTooLarge();
 }
@@ -339,7 +343,7 @@ void EnvoyQuicServerStream::maybeDecodeTrailers() {
   if (sequencer()->IsClosed() && !FinishedReadingTrailers()) {
     ASSERT(!received_trailers().empty());
     // Only decode trailers after finishing decoding body.
-ENVOY_STREAM_LOG(debug, "decodeTrailers: {}.", *this, received_trailers().DebugString());
+    ENVOY_STREAM_LOG(debug, "decodeTrailers: {}.", *this, received_trailers().DebugString());
     request_decoder_->decodeTrailers(
         spdyHeaderBlockToEnvoyHeaders<Http::RequestTrailerMapImpl>(received_trailers()));
     end_stream_decoded_ = true;
@@ -350,10 +354,11 @@ ENVOY_STREAM_LOG(debug, "decodeTrailers: {}.", *this, received_trailers().DebugS
 void EnvoyQuicServerStream::OnStreamReset(const quic::QuicRstStreamFrame& frame) {
   quic::QuicSpdyServerStreamBase::OnStreamReset(frame);
   Http::StreamResetReason reason = quicRstErrorToEnvoyRemoteResetReason(frame.error_code);
-  if (reason == Http::StreamResetReason::RemoteReset || reason == Http::StreamResetReason::ConnectError) {
-  setDetails(Http3ResponseCodeDetailValues::remote_reset);
+  if (reason == Http::StreamResetReason::RemoteReset ||
+      reason == Http::StreamResetReason::ConnectError) {
+    setDetails(Http3ResponseCodeDetailValues::remote_reset);
   } else if (reason == Http::StreamResetReason::RemoteRefusedStreamReset) {
- setDetails(Http3ResponseCodeDetailValues::remote_refused);
+    setDetails(Http3ResponseCodeDetailValues::remote_refused);
   }
   runResetCallbacks(reason);
 }
@@ -398,23 +403,25 @@ QuicFilterManagerConnectionImpl* EnvoyQuicServerStream::filterManagerConnection(
   return dynamic_cast<QuicFilterManagerConnectionImpl*>(session());
 }
 
- HeaderValidationResult EnvoyQuicServerStream::checkHeaderNameForUnderscores(const std::string& header_name) {
-    if (headers_with_underscores_action_ == envoy::config::core::v3::HttpProtocolOptions::ALLOW || !Http::HeaderUtility::headerNameContainsUnderscore(header_name)) {
-      return HeaderValidationResult::ACCEPT;
-    }
-    if (headers_with_underscores_action_ ==
-        envoy::config::core::v3::HttpProtocolOptions::DROP_HEADER) {
-      ENVOY_STREAM_LOG(debug, "Dropping header with invalid characters in its name: {}", *this,
-                     header_name);
-      // TODO(danzh) Increment dropped_headers_with_underscores_ once http3 stats is propogated;
-      return HeaderValidationResult::DROP;
-    }
-      ENVOY_STREAM_LOG(debug, "Rejecting request due to header name with underscores: {}",
-                     *this, header_name);
-      // TODO(danzh) Increment requests_rejected_with_underscores_in_headers_ once http3 stats is propogated;
-      return HeaderValidationResult::INVALID;
+HeaderValidationResult
+EnvoyQuicServerStream::checkHeaderNameForUnderscores(const std::string& header_name) {
+  if (headers_with_underscores_action_ == envoy::config::core::v3::HttpProtocolOptions::ALLOW ||
+      !Http::HeaderUtility::headerNameContainsUnderscore(header_name)) {
+    return HeaderValidationResult::ACCEPT;
   }
-
+  if (headers_with_underscores_action_ ==
+      envoy::config::core::v3::HttpProtocolOptions::DROP_HEADER) {
+    ENVOY_STREAM_LOG(debug, "Dropping header with invalid characters in its name: {}", *this,
+                     header_name);
+    // TODO(danzh) Increment dropped_headers_with_underscores_ once http3 stats is propogated;
+    return HeaderValidationResult::DROP;
+  }
+  ENVOY_STREAM_LOG(debug, "Rejecting request due to header name with underscores: {}", *this,
+                   header_name);
+  // TODO(danzh) Increment requests_rejected_with_underscores_in_headers_ once http3 stats is
+  // propogated;
+  return HeaderValidationResult::INVALID;
+}
 
 } // namespace Quic
 } // namespace Envoy

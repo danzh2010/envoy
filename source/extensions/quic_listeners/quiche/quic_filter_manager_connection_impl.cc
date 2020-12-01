@@ -78,7 +78,8 @@ void QuicFilterManagerConnectionImpl::close(Network::ConnectionCloseType type) {
       delayed_close_state_ = DelayedCloseState::CloseAfterFlush;
     }
   } else if (hasDataToWrite()) {
-    // Quic connection has unsent data but caller wants to close right away.
+    std::cerr
+        << "========= Quic connection has unsent data but caller wants to close right away.\n";
     ASSERT(type == Network::ConnectionCloseType::NoFlush);
     quic_connection_->OnCanWrite();
     closeConnectionImmediately();
@@ -176,7 +177,7 @@ void QuicFilterManagerConnectionImpl::closeConnectionImmediately() {
   if (quic_connection_ == nullptr) {
     return;
   }
-  quic_connection_->CloseConnection(quic::QUIC_NO_ERROR, "Closed by application",
+  quic_connection_->CloseConnection(quic::QUIC_CONNECTION_CANCELLED, "Closed by application",
                                     quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   quic_connection_ = nullptr;
 }

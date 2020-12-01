@@ -38,9 +38,14 @@ void QuicHttpConnectionImplBase::runWatermarkCallbacksForEachStream(
 }
 
 QuicHttpServerConnectionImpl::QuicHttpServerConnectionImpl(
-    EnvoyQuicServerSession& quic_session, Http::ServerConnectionCallbacks& callbacks)
-    : QuicHttpConnectionImplBase(quic_session), quic_server_session_(quic_session) {
+    EnvoyQuicServerSession& quic_session, Http::ServerConnectionCallbacks& callbacks,
+    const uint32_t max_request_headers_kb, const uint32_t max_request_headers_count,
+    envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+        headers_with_underscores_action)
+    : QuicHttpConnectionImplBase(quic_session, max_request_headers_kb, max_request_headers_count),
+      quic_server_session_(quic_session) {
   quic_session.setHttpConnectionCallbacks(callbacks);
+  quic_server_session_.set_headers_with_underscores_action(headers_with_underscores_action);
 }
 
 void QuicHttpServerConnectionImpl::onUnderlyingConnectionAboveWriteBufferHighWatermark() {
@@ -67,9 +72,11 @@ void QuicHttpServerConnectionImpl::goAway() {
   }
 }
 
-QuicHttpClientConnectionImpl::QuicHttpClientConnectionImpl(EnvoyQuicClientSession& session,
-                                                           Http::ConnectionCallbacks& callbacks)
-    : QuicHttpConnectionImplBase(session), quic_client_session_(session) {
+QuicHttpClientConnectionImpl::QuicHttpClientConnectionImpl(
+    EnvoyQuicClientSession& session, Http::ConnectionCallbacks& callbacks,
+    const uint32_t max_response_headers_kb, const uint32_t max_response_headers_count)
+    : QuicHttpConnectionImplBase(session, max_response_headers_kb, max_response_headers_count),
+      quic_client_session_(session) {
   session.setHttpConnectionCallbacks(callbacks);
 }
 
@@ -98,17 +105,23 @@ void QuicHttpClientConnectionImpl::onUnderlyingConnectionBelowWriteBufferLowWate
 
 std::unique_ptr<Http::ClientConnection>
 QuicHttpClientConnectionFactoryImpl::createQuicClientConnection(
-    Network::Connection& connection, Http::ConnectionCallbacks& callbacks) {
+    Network::Connection& connection, Http::ConnectionCallbacks& callbacks,
+    const uint32_t max_response_headers_kb, const uint32_t max_response_headers_count) {
   return std::make_unique<Quic::QuicHttpClientConnectionImpl>(
-      dynamic_cast<Quic::EnvoyQuicClientSession&>(connection), callbacks);
+      dynamic_cast<Quic::EnvoyQuicClientSession&>(connection), callbacks, max_response_headers_kb,
+      max_response_headers_count);
 }
 
 std::unique_ptr<Http::ServerConnection>
 QuicHttpServerConnectionFactoryImpl::createQuicServerConnection(
-    Network::Connection& connection, Http::ConnectionCallbacks& callbacks) {
+    Network::Connection& connection, Http::ConnectionCallbacks& callbacks,
+    const uint32_t max_request_headers_kb, const uint32_t max_request_headers_count,
+    envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+        headers_with_underscores_action) {
   return std::make_unique<Quic::QuicHttpServerConnectionImpl>(
       dynamic_cast<Quic::EnvoyQuicServerSession&>(connection),
-      dynamic_cast<Http::ServerConnectionCallbacks&>(callbacks));
+      dynamic_cast<Http::ServerConnectionCallbacks&>(callbacks), max_request_headers_kb,
+      max_request_headers_count, headers_with_underscores_action);
 }
 
 REGISTER_FACTORY(QuicHttpClientConnectionFactoryImpl, Http::QuicHttpClientConnectionFactory);

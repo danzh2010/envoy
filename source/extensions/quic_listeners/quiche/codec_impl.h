@@ -18,8 +18,10 @@ namespace Quic {
 class QuicHttpConnectionImplBase : public virtual Http::Connection,
                                    protected Logger::Loggable<Logger::Id::quic> {
 public:
-  QuicHttpConnectionImplBase(QuicFilterManagerConnectionImpl& quic_session)
-      : quic_session_(quic_session) {}
+  QuicHttpConnectionImplBase(QuicFilterManagerConnectionImpl& quic_session,
+                             const uint32_t max_headers_kb, const uint32_t max_headers_count)
+      : quic_session_(quic_session), max_headers_kb_(max_headers_kb),
+        max_headers_count_(max_headers_count) {}
 
   // Http::Connection
   Http::Status dispatch(Buffer::Instance& /*data*/) override {
@@ -35,15 +37,26 @@ public:
       quic::QuicSmallMap<quic::QuicStreamId, std::unique_ptr<quic::QuicStream>, 10>& stream_map,
       bool high_watermark);
 
+  uint32_t max_headers_kb() const { return max_headers_kb_; }
+
+  uint32_t max_headers_count() const { return max_headers_count_; }
+
 protected:
   QuicFilterManagerConnectionImpl& quic_session_;
+
+private:
+  uint32_t max_headers_kb_;
+  const uint32_t max_headers_count_;
 };
 
 class QuicHttpServerConnectionImpl : public QuicHttpConnectionImplBase,
                                      public Http::ServerConnection {
 public:
-  QuicHttpServerConnectionImpl(EnvoyQuicServerSession& quic_session,
-                               Http::ServerConnectionCallbacks& callbacks);
+  QuicHttpServerConnectionImpl(
+      EnvoyQuicServerSession& quic_session, Http::ServerConnectionCallbacks& callbacks,
+      const uint32_t max_request_headers_kb, const uint32_t max_request_headers_count,
+      envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+          headers_with_underscores_action);
 
   // Http::Connection
   void goAway() override;
@@ -59,7 +72,9 @@ class QuicHttpClientConnectionImpl : public QuicHttpConnectionImplBase,
                                      public Http::ClientConnection {
 public:
   QuicHttpClientConnectionImpl(EnvoyQuicClientSession& session,
-                               Http::ConnectionCallbacks& callbacks);
+                               Http::ConnectionCallbacks& callbacks,
+                               const uint32_t max_request_headers_kb,
+                               const uint32_t max_request_headers_count);
 
   // Http::ClientConnection
   Http::RequestEncoder& newStream(Http::ResponseDecoder& response_decoder) override;
@@ -78,8 +93,9 @@ private:
 class QuicHttpClientConnectionFactoryImpl : public Http::QuicHttpClientConnectionFactory {
 public:
   std::unique_ptr<Http::ClientConnection>
-  createQuicClientConnection(Network::Connection& connection,
-                             Http::ConnectionCallbacks& callbacks) override;
+  createQuicClientConnection(Network::Connection& connection, Http::ConnectionCallbacks& callbacks,
+                             const uint32_t max_response_headers_kb,
+                             const uint32_t max_response_headers_count) override;
 
   std::string name() const override { return Http::QuicCodecNames::get().Quiche; }
 };
@@ -87,9 +103,11 @@ public:
 // A factory to create QuicHttpServerConnection.
 class QuicHttpServerConnectionFactoryImpl : public Http::QuicHttpServerConnectionFactory {
 public:
-  std::unique_ptr<Http::ServerConnection>
-  createQuicServerConnection(Network::Connection& connection,
-                             Http::ConnectionCallbacks& callbacks) override;
+  std::unique_ptr<Http::ServerConnection> createQuicServerConnection(
+      Network::Connection& connection, Http::ConnectionCallbacks& callbacks,
+      const uint32_t max_request_headers_kb, const uint32_t max_request_headers_count,
+      envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+          headers_with_underscores_action) override;
 
   std::string name() const override { return Http::QuicCodecNames::get().Quiche; }
 };

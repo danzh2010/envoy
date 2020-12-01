@@ -30,7 +30,6 @@
 #include "extensions/quic_listeners/quiche/envoy_quic_utils.h"
 #include "test/extensions/quic_listeners/quiche/test_utils.h"
 
-
 namespace Envoy {
 namespace Quic {
 
@@ -58,15 +57,15 @@ public:
         injected_resource_filename_2_(TestEnvironment::temporaryPath("injected_resource_2")),
         file_updater_1_(injected_resource_filename_1_),
         file_updater_2_(injected_resource_filename_2_) {
-          if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
-  supported_versions_ = quic::CurrentSupportedVersionsWithQuicCrypto();
-          } else {
-          bool use_http3 = GetParam().second == QuicVersionType::Iquic;
-          SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
-          SetQuicReloadableFlag(quic_disable_version_draft_27, !use_http3);
-          supported_versions_ =  quic::CurrentSupportedVersions();
-        }
-        }
+    if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
+      supported_versions_ = quic::CurrentSupportedVersionsWithQuicCrypto();
+    } else {
+      bool use_http3 = GetParam().second == QuicVersionType::Iquic;
+      SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
+      SetQuicReloadableFlag(quic_disable_version_draft_27, !use_http3);
+      supported_versions_ = quic::CurrentSupportedVersions();
+    }
+  }
 
   ~QuicHttpIntegrationTest() override { cleanupUpstreamAndDownstream(); }
 
@@ -315,8 +314,9 @@ TEST_P(QuicHttpIntegrationTest, ConnectionMigration) {
   // Change to a new port by switching socket, and connection should still continue.
   Network::Address::InstanceConstSharedPtr local_addr =
       Network::Test::getCanonicalLoopbackAddress(version_);
-  static_cast<EnvoyQuicClientConnection*>(static_cast<EnvoyQuicClientSession*>(codec_client_->connection())->connection())->switchConnectionSocket(
-      createConnectionSocket(server_addr_, local_addr, nullptr));
+  static_cast<EnvoyQuicClientConnection*>(
+      static_cast<EnvoyQuicClientSession*>(codec_client_->connection())->connection())
+      ->switchConnectionSocket(createConnectionSocket(server_addr_, local_addr, nullptr));
   EXPECT_NE(old_port, local_addr->ip()->port());
   // Send the rest data.
   codec_client_->sendData(*request_encoder_, 1024u, true);

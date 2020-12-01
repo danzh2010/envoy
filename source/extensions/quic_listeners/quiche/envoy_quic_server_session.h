@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -50,6 +52,12 @@ public:
     http_connection_callbacks_ = &callbacks;
   }
 
+  void set_headers_with_underscores_action(
+      envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+          headers_with_underscores_action) {
+    headers_with_underscores_action_ = headers_with_underscores_action;
+  }
+
   // quic::QuicSession
   void OnConnectionClosed(const quic::QuicConnectionCloseFrame& frame,
                           quic::ConnectionCloseSource source) override;
@@ -86,6 +94,8 @@ private:
   // These callbacks are owned by network filters and quic session should out live
   // them.
   Http::ServerConnectionCallbacks* http_connection_callbacks_{nullptr};
+  envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
+      headers_with_underscores_action_;
 };
 
 } // namespace Quic

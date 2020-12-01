@@ -10,7 +10,7 @@
 #include "envoy/event/timer.h"
 #include "envoy/network/filter.h"
 #include "envoy/network/socket.h"
-#include "server/backtrace.h"
+
 #include "common/common/assert.h"
 #include "common/common/empty_string.h"
 #include "common/common/enum_to_int.h"
@@ -18,6 +18,8 @@
 #include "common/network/listen_socket_impl.h"
 #include "common/network/raw_buffer_socket.h"
 #include "common/network/utility.h"
+
+#include "server/backtrace.h"
 
 namespace Envoy {
 namespace Network {
@@ -79,7 +81,7 @@ ConnectionImpl::ConnectionImpl(Event::Dispatcher& dispatcher, ConnectionSocketPt
       Event::FileReadyType::Read | Event::FileReadyType::Write);
 
   transport_socket_->setTransportSocketCallbacks(*this);
-      }
+}
 
 ConnectionImpl::~ConnectionImpl() {
   ASSERT(!ioHandle().isOpen() && delayed_close_timer_ == nullptr,

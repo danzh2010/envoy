@@ -156,7 +156,8 @@ INSTANTIATE_TEST_SUITE_P(EnvoyQuicClientStreamTests, EnvoyQuicClientStreamTest,
 
 TEST_P(EnvoyQuicClientStreamTest, GetRequestAndHeaderOnlyResponse) {
   quic::SetVerbosityLogThreshold(2);
-  Http::TestRequestHeaderMapImpl request_headers{{":authority", host_}, {":method", "GET"}, {":path", "/"}};
+  Http::TestRequestHeaderMapImpl request_headers{
+      {":authority", host_}, {":method", "GET"}, {":path", "/"}};
   const auto result = quic_stream_->encodeHeaders(request_headers, /*end_stream=*/true);
   EXPECT_TRUE(result.ok());
 
@@ -166,14 +167,13 @@ TEST_P(EnvoyQuicClientStreamTest, GetRequestAndHeaderOnlyResponse) {
         EXPECT_EQ("301", headers->getStatusValue());
       }));
   if (quic::VersionUsesHttp3(quic_version_.transport_version)) {
-    EXPECT_CALL(stream_decoder_, decodeData(BufferStringEqual(""), /*end_stream=*/true)).WillOnce([this](){
-      quic_session_.close(Network::ConnectionCloseType::NoFlush);
-    });
-      spdy::SpdyHeaderBlock response_headers;
-      response_headers[":status"]="301";
-      response_headers["location"]="https://www.redirect.com/foo";
-       response_headers["date"]="Wed, 18 Nov 2020 22:57:12 GMT";
- response_headers["server"]="envoy";
+    EXPECT_CALL(stream_decoder_, decodeData(BufferStringEqual(""), /*end_stream=*/true))
+        .WillOnce([this]() { quic_session_.close(Network::ConnectionCloseType::NoFlush); });
+    spdy::SpdyHeaderBlock response_headers;
+    response_headers[":status"] = "301";
+    response_headers["location"] = "https://www.redirect.com/foo";
+    response_headers["date"] = "Wed, 18 Nov 2020 22:57:12 GMT";
+    response_headers["server"] = "envoy";
     std::string payload = spdyHeaderToHttp3StreamPayload(response_headers);
     quic::QuicStreamFrame frame(stream_id_, true, 0, payload);
     quic_stream_->OnStreamFrame(frame);

@@ -25,6 +25,7 @@
 #include "quiche/quic/platform/api/quic_ip_address.h"
 #include "quiche/quic/platform/api/quic_socket_address.h"
 
+#include "absl/strings/str_split.h"
 #include "openssl/ssl.h"
 
 namespace Envoy {
@@ -37,14 +38,32 @@ quicAddressToEnvoyAddressInstance(const quic::QuicSocketAddress& quic_address);
 
 quic::QuicSocketAddress envoyIpAddressToQuicSocketAddress(const Network::Address::Ip* envoy_ip);
 
+enum class HeaderValidationResult {
+  ACCEPT = 0,
+  DROP,
+  INVALID,
+};
+
 // The returned header map has all keys in lower case.
 template <class T>
-std::unique_ptr<T> quicHeadersToEnvoyHeaders(const quic::QuicHeaderList& header_list) {
+std::unique_ptr<T> quicHeadersToEnvoyHeaders(
+    const quic::QuicHeaderList& header_list,
+    std::function<HeaderValidationResult(const std::string&, const absl::string_view&)> validator) {
   auto headers = T::create();
   for (const auto& entry : header_list) {
-    // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
-    headers->addCopy(Http::LowerCaseString(entry.first), entry.second);
+    std::vector<absl::string_view> values = absl::StrSplit(entry.second, '\0');
+    for (const absl::string_view& value : values) {
+      HeaderValidationResult result =
+          validator == nullptr ? HeaderValidationResult::ACCEPT : validator(entry.first, value);
+      if (result == HeaderValidationResult::ACCEPT) {
+        // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
+        headers->addCopy(Http::LowerCaseString(entry.first), value);
+      } else if (result == HeaderValidationResult::INVALID) {
+        return nullptr;
+      }
+    }
   }
+
   return headers;
 }
 
@@ -54,8 +73,10 @@ std::unique_ptr<T> spdyHeaderBlockToEnvoyHeaders(const spdy::SpdyHeaderBlock& he
   for (auto entry : header_block) {
     // TODO(danzh): Avoid temporary strings and addCopy() with string_view.
     std::string key(entry.first);
-    std::string value(entry.second);
-    headers->addCopy(Http::LowerCaseString(key), value);
+    std::vector<absl::string_view> values = absl::StrSplit(entry.second, '\0');
+    for (const absl::string_view& value : values) {
+      headers->addCopy(Http::LowerCaseString(key), value);
+    }
   }
   return headers;
 }

@@ -70,6 +70,8 @@ public:
     }
   }
 
+  absl::string_view responseDetails() override { return details_; }
+
   void addCallbacks(Http::StreamCallbacks& callbacks) override {
     ASSERT(!local_end_stream_);
     addCallbacksHelper(callbacks);
@@ -104,6 +106,8 @@ protected:
   virtual uint32_t streamId() PURE;
   virtual Network::Connection* connection() PURE;
 
+  void setDetails(absl::string_view details) { details_ = details; }
+
   // True once end of stream is propagated to Envoy. Envoy doesn't expect to be
   // notified more than once about end of stream. So once this is true, no need
   // to set it in the callback to Envoy stream any more.
@@ -131,6 +135,8 @@ private:
   // executed, the stream might be unblocked and blocked several times. Only the
   // latest desired state should be considered by the callback.
   bool should_block_{false};
+
+  absl::string_view details_;
 };
 
 } // namespace Quic
