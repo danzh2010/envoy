@@ -70,10 +70,6 @@ public:
 
   ~QuicHttpIntegrationTest() override { cleanupUpstreamAndDownstream(); }
 
-  void SetUp() override {
-    setUpstreamProtocol(FakeHttpConnection::Type::HTTP2);
-  }
-
   // This call may fail because of INVALID_VERSION, because QUIC connection doesn't support
   // in-connection version negotiation.
   // TODO(#8479) Propagate INVALID_VERSION error to caller and let caller to use server advertised
@@ -152,6 +148,8 @@ public:
       // create connections with the first 4 bytes of connection id different from each
       // other so they should be evenly distributed.
       designated_connection_ids_.push_back(quic::test::TestConnectionId(i << 32));
+      // TODO(sunjayBhatia,wrowe): deserialize this, establishing all connections in parallel
+      // (Expected to save ~14s each across 6 tests on Windows)
       codec_clients.push_back(makeHttpConnection(lookupPort("http")));
     }
     constexpr auto timeout_first = std::chrono::seconds(15);
@@ -285,9 +283,13 @@ TEST_P(QuicHttpIntegrationTest, TestDelayedConnectionTeardownTimeoutTrigger) {
             1);
 }
 
-TEST_P(QuicHttpIntegrationTest, MultipleQuicConnectionsWithBPF) { testMultipleQuicConnections(); }
+// Ensure multiple quic connections work, regardless of platform BPF support
+TEST_P(QuicHttpIntegrationTest, MultipleQuicConnectionsDefaultMode) {
+  testMultipleQuicConnections();
+}
 
 TEST_P(QuicHttpIntegrationTest, MultipleQuicConnectionsNoBPF) {
+  // Note: This runtime override is a no-op on platforms without BPF
   config_helper_.addRuntimeOverride(
       "envoy.reloadable_features.prefer_quic_kernel_bpf_packet_routing", "false");
 
@@ -420,8 +422,9 @@ TEST_P(QuicHttpIntegrationTest, CertVerificationFailure) {
 }
 
 TEST_P(QuicHttpIntegrationTest, RequestResponseWithTrailers) {
-  testTrailers(/*request_size=*/ 10, /*response_size=*/10, /*request_trailers_present=*/true,
-                    /*response_trailers_present=*/true);
+  config_helper_.addConfigModifier(setEnableUpstreamTrailersHttp1());
+  testTrailers(/*request_size=*/10, /*response_size=*/10, /*request_trailers_present=*/true,
+               /*response_trailers_present=*/true);
 }
 
 } // namespace Quic

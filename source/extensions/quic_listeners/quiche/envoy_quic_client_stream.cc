@@ -10,6 +10,7 @@
 #include "quiche/quic/core/http/quic_header_list.h"
 #include "quiche/spdy/core/spdy_header_block.h"
 #include "extensions/quic_listeners/quiche/platform/quic_mem_slice_span_impl.h"
+#include "quiche/common/platform/api/quiche_text_utils.h"
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
@@ -20,7 +21,10 @@
 
 #include "common/buffer/buffer_impl.h"
 #include "common/http/header_map_impl.h"
+#include "common/http/header_utility.h"
+#include "common/http/utility.h"
 #include "common/common/assert.h"
+#include "common/common/enum_to_int.h"
 
 #include "server/backtrace.h"
 
@@ -48,25 +52,46 @@ EnvoyQuicClientStream::EnvoyQuicClientStream(quic::PendingStream* pending,
           16 * 1024, [this]() { runLowWatermarkCallbacks(); },
           [this]() { runHighWatermarkCallbacks(); }) {}
 
-void EnvoyQuicClientStream::encodeHeaders(const Http::RequestHeaderMap& headers, bool end_stream) {
+Http::Status EnvoyQuicClientStream::encodeHeaders(const Http::RequestHeaderMap& headers,
+                                                  bool end_stream) {
+  // Required headers must be present. This can only happen by some erroneous processing after the
+  // downstream codecs decode.
+  RETURN_IF_ERROR(Http::HeaderUtility::checkRequiredHeaders(headers));
   ENVOY_STREAM_LOG(debug, "encodeHeaders: (end_stream={}) {}.", *this, end_stream, headers);
   quic::QuicStream* writing_stream =
       quic::VersionUsesHttp3(transport_version())
           ? static_cast<quic::QuicStream*>(this)
           : (dynamic_cast<quic::QuicSpdySession*>(session())->headers_stream());
   const uint64_t bytes_to_send_old = writing_stream->BufferedDataBytes();
-  WriteHeaders(envoyHeadersToSpdyHeaderBlock(headers), end_stream, nullptr);
+  auto spdy_headers = envoyHeadersToSpdyHeaderBlock(headers);
+  if (headers.Method() && headers.Method()->value() == "CONNECT") {
+    // It is a bytestream connect and should have :path and :protocol set accordingly
+    // As HTTP/1.1 does not require a path for CONNECT, we may have to add one
+    // if shifting codecs. For now, default to "/" - this can be made
+    // configurable if necessary.
+    // https://tools.ietf.org/html/draft-kinnear-httpbis-http2-transport-02
+    spdy_headers[":protocol"] = Http::Headers::get().ProtocolValues.Bytestream;
+    if (!headers.Path()) {
+      spdy_headers[":path"]= "/";
+    }
+  }
+  WriteHeaders(std::move(spdy_headers), end_stream, nullptr);
   local_end_stream_ = end_stream;
   const uint64_t bytes_to_send_new = writing_stream->BufferedDataBytes();
   ASSERT(bytes_to_send_old <= bytes_to_send_new);
   // IETF QUIC sends HEADER frame on current stream. After writing headers, the
   // buffer may increase.
   maybeCheckWatermark(bytes_to_send_old, bytes_to_send_new, *filterManagerConnection());
+  return Http::okStatus();
 }
 
 void EnvoyQuicClientStream::encodeData(Buffer::Instance& data, bool end_stream) {
   ENVOY_STREAM_LOG(debug, "encodeData (end_stream={}) of {} bytes.", *this, end_stream,
                    data.length());
+  if (data.length() == 0 && !end_stream) {
+    return;
+  }
+  ASSERT(!local_end_stream_);
   local_end_stream_ = end_stream;
   // This is counting not serialized bytes in the send buffer.
   const uint64_t bytes_to_send_old = BufferedDataBytes();
@@ -107,8 +132,6 @@ void EnvoyQuicClientStream::encodeMetadata(const Http::MetadataMapVector& /*meta
 }
 
 void EnvoyQuicClientStream::resetStream(Http::StreamResetReason reason) {
-  // Higher layers expect calling resetStream() to immediately raise reset callbacks.
-  runResetCallbacks(reason);
   Reset(envoyResetReasonToQuicRstError(reason));
 }
 
@@ -125,16 +148,65 @@ void EnvoyQuicClientStream::switchStreamBlockState(bool should_block) {
 
 void EnvoyQuicClientStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
                                                      const quic::QuicHeaderList& header_list) {
-  quic::QuicSpdyStream::OnInitialHeadersComplete(fin, frame_len, header_list);
   if (rst_sent()) {
     return;
   }
-  ASSERT(headers_decompressed());
-  response_decoder_->decodeHeaders(
-      quicHeadersToEnvoyHeaders<Http::ResponseHeaderMapImpl>(header_list), /*end_stream=*/fin);
+  quic::QuicSpdyStream::OnInitialHeadersComplete(fin, frame_len, header_list);
+  ASSERT(headers_decompressed() && !header_list.empty());
+
+  ENVOY_STREAM_LOG(debug, "decodeHeaders: {}.", *this, header_list.DebugString());
   if (fin) {
     end_stream_decoded_ = true;
   }
+  bool close_connection_upon_invalid_header;
+  std::unique_ptr<Http::ResponseHeaderMapImpl> headers = quicHeadersToEnvoyHeaders<Http::ResponseHeaderMapImpl>(header_list, [this, &close_connection_upon_invalid_header](const std::string& header_name, absl::string_view header_value){
+    if (header_name == "content-length") {
+      std::vector<absl::string_view> values =
+        absl::StrSplit(header_value, ',');
+      absl::optional<uint64_t> content_length;
+    for (const absl::string_view& value : values) {
+      uint64_t new_value;
+      if (!absl::SimpleAtoi(value, &new_value) ||
+          !quiche::QuicheTextUtils::IsAllDigits(value)) {
+        ENVOY_STREAM_LOG(debug, "Content length was either unparseable or negative", *this);
+        // TODO(danzh) set value according to override_stream_error_on_invalid_http_message from configured http2 options.
+        close_connection_upon_invalid_header = true;
+        return HeaderValidationResult::INVALID;
+      }
+      if (!content_length.has_value()) {
+        content_length = new_value;
+        continue;
+      }
+      if (new_value != content_length.value()) {
+        ENVOY_STREAM_LOG(debug, "Parsed content length {} is inconsistent with previously detected content length {}", *this, new_value, content_length.value());
+close_connection_upon_invalid_header = false;
+        return HeaderValidationResult::INVALID;
+      }
+    }
+    }
+    return HeaderValidationResult::ACCEPT;
+  });
+  if (headers == nullptr) {
+    Reset(quic::QUIC_BAD_APPLICATION_PAYLOAD);
+    return;
+  }
+
+  const uint64_t status = Http::Utility::getResponseStatus(*headers);
+ if (status >= 100 && status < 200) {
+    // These are Informational 1xx headers, not the actual response headers.
+    ENVOY_STREAM_LOG(debug,  "Received informational response code: {}", *this, status);
+    set_headers_decompressed(false);
+    if (status == 100 && !decoded_100_continue_) {
+      // This is 100 Continue, only decode it once to support Expect:100-Continue header.
+      decoded_100_continue_ = true;
+    response_decoder_->decode100ContinueHeaders(std::move(headers));
+    }
+ } else {
+  response_decoder_->decodeHeaders(
+     std::move(headers),
+      /*end_stream=*/fin);
+  }
+
   ConsumeHeaderList();
 }
 
@@ -170,10 +242,12 @@ void EnvoyQuicClientStream::OnBodyAvailable() {
   bool skip_decoding = (buffer->length() == 0 && !fin_read_and_no_trailers) || end_stream_decoded_;
   if (!skip_decoding) {
     std::cerr << " ============ decode data fin_read_and_no_trailers = " << fin_read_and_no_trailers << " buffer length " << buffer->length() << "\n";
-    response_decoder_->decodeData(*buffer, fin_read_and_no_trailers);
     if (fin_read_and_no_trailers) {
       end_stream_decoded_ = true;
     }
+    response_decoder_->decodeData(*buffer, fin_read_and_no_trailers);
+
+
   }
 
   if (!sequencer()->IsClosed()) {
@@ -186,42 +260,57 @@ void EnvoyQuicClientStream::OnBodyAvailable() {
     return;
   }
 
-    // Trailers may arrived earlier and wait to be consumed after reading all the body. Consume it here.
-    maybeDecodeTrailers();
+  // Trailers may arrived earlier and wait to be consumed after reading all the body. Consume it
+  // here.
+  maybeDecodeTrailers();
 
-    OnFinRead();
+  OnFinRead();
   in_decode_data_callstack_ = false;
 }
 
 void EnvoyQuicClientStream::OnTrailingHeadersComplete(bool fin, size_t frame_len,
                                                       const quic::QuicHeaderList& header_list) {
   std::cerr << "============ OnTrailingHeadersComplete\n";
+  if (rst_sent()) {
+    return;
+  }
   quic::QuicSpdyStream::OnTrailingHeadersComplete(fin, frame_len, header_list);
   ASSERT(trailers_decompressed());
-  if (session()->connection()->connected()) {
+  if (session()->connection()->connected() && !rst_sent()) {
     maybeDecodeTrailers();
-     }
+  }
 }
 
 void EnvoyQuicClientStream::maybeDecodeTrailers() {
   if (sequencer()->IsClosed() && !FinishedReadingTrailers()) {
+    ASSERT(!received_trailers().empty());
+    end_stream_decoded_ = true;
+    ENVOY_STREAM_LOG(debug, "decodeTrailers: {}.", *this, received_trailers().DebugString());
     // Only decode trailers after finishing decoding body.
     response_decoder_->decodeTrailers(
         spdyHeaderBlockToEnvoyHeaders<Http::ResponseTrailerMapImpl>(received_trailers()));
-    end_stream_decoded_ = true;
     MarkTrailersConsumed();
   }
 }
 
 void EnvoyQuicClientStream::OnStreamReset(const quic::QuicRstStreamFrame& frame) {
   quic::QuicSpdyClientStream::OnStreamReset(frame);
-  runResetCallbacks(quicRstErrorToEnvoyResetReason(frame.error_code));
+  runResetCallbacks(quicRstErrorToEnvoyRemoteResetReason(frame.error_code));
+}
+
+void EnvoyQuicClientStream::Reset(quic::QuicRstStreamErrorCode error) {
+  std::cerr << "=============== Reset with error " << error << "\n";
+  // Upper layers expect calling resetStream() to immediately raise reset callbacks.
+  runResetCallbacks(quicRstErrorToEnvoyLocalResetReason(error));
+  quic::QuicSpdyClientStream::Reset(error);
 }
 
 void EnvoyQuicClientStream::OnConnectionClosed(quic::QuicErrorCode error,
                                                quic::ConnectionCloseSource source) {
   quic::QuicSpdyClientStream::OnConnectionClosed(error, source);
-  runResetCallbacks(quicErrorCodeToEnvoyResetReason(error));
+  if (!end_stream_decoded_) {
+  runResetCallbacks(Http::StreamResetReason::ConnectionTermination);
+  }
 }
 
 void EnvoyQuicClientStream::OnClose() {

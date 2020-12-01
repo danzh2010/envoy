@@ -73,6 +73,9 @@ private:
   // Deliver awaiting trailers if body has been delivered.
   void maybeDecodeTrailers();
 
+  // Deliver awaiting trailers if body has been delivered.
+  void maybeDecodeTrailers();
+
   Http::RequestDecoder* request_decoder_{nullptr};
 };
 
