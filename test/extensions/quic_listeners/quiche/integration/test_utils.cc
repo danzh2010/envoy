@@ -107,7 +107,7 @@ TestUtils::makeSingleHttp3Request(Network::Address::InstanceConstSharedPtr& addr
   Event::DispatcherPtr dispatcher(api.allocateDispatcher("test_thread"));
   std::shared_ptr<Upstream::MockClusterInfo> cluster{new NiceMock<Upstream::MockClusterInfo>()};
   Upstream::HostDescriptionConstSharedPtr host_description{
-      Upstream::makeTestHostDescription(cluster, "udp://127.0.0.1:80")};
+      Upstream::makeTestHostDescription(cluster, "udp://127.0.0.1:80", time_system)};
 
   quic::QuicConfig quic_config;
   quic::QuicServerId server_id{"lyft.com", 443, false};

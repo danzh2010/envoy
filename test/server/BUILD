@@ -101,6 +101,16 @@ envoy_cc_test(
 )
 
 envoy_cc_test(
+    name = "filter_config_test",
+    srcs = ["filter_config_test.cc"],
+    deps = [
+        "//include/envoy/server:filter_config_interface",
+        "//source/extensions/filters/http/common:pass_through_filter_lib",
+        "//test/mocks/server:server_mocks",
+    ],
+)
+
+envoy_cc_test(
     name = "hot_restart_impl_test",
     srcs = envoy_select_hot_restart(["hot_restart_impl_test.cc"]),
     deps = [
@@ -371,6 +381,7 @@ envoy_cc_test(
         "//test/common/stats:stat_test_utility_lib",
         "//test/integration:integration_lib",
         "//test/mocks/server:bootstrap_extension_factory_mocks",
+        "//test/mocks/server:fatal_action_factory_mocks",
         "//test/mocks/server:hot_restart_mocks",
         "//test/mocks/server:instance_mocks",
         "//test/mocks/server:options_mocks",

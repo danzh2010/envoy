@@ -125,9 +125,9 @@ public:
   void initialize() override;
 
 protected:
-  void useAccessLog(absl::string_view format = "");
+  void useAccessLog(absl::string_view format = "",
+                    std::vector<envoy::config::core::v3::TypedExtensionConfig> formatters = {});
 
-  Network::TransportSocketFactoryPtr createUpstreamTlsContext();
   IntegrationCodecClientPtr makeHttpConnection(uint32_t port);
   // Makes a http connection object without checking its connected state.
   virtual IntegrationCodecClientPtr makeRawHttpConnection(
@@ -170,6 +170,11 @@ protected:
   void waitForNextUpstreamRequest(
       uint64_t upstream_index = 0,
       std::chrono::milliseconds connection_wait_timeout = TestUtility::DefaultTimeout);
+
+  absl::optional<uint64_t>
+  waitForNextUpstreamConnection(const std::vector<uint64_t>& upstream_indices,
+                                std::chrono::milliseconds connection_wait_timeout,
+                                FakeHttpConnectionPtr& fake_upstream_connection);
 
   // Close |codec_client_| and |fake_upstream_connection_| cleanly.
   void cleanupUpstreamAndDownstream();
@@ -238,7 +243,7 @@ protected:
   void testGrpcRetry();
 
   void testEnvoyHandling100Continue(bool additional_continue_from_upstream = false,
-                                    const std::string& via = "");
+                                    const std::string& via = "", bool disconnect_after_100 = false);
   void testEnvoyProxying1xx(bool continue_before_upstream_complete = false,
                             bool with_encoder_filter = false,
                             bool with_multiple_1xx_headers = false);

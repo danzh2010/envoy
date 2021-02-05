@@ -86,6 +86,7 @@ envoy_cc_test(
         "//test/mocks/api:api_mocks",
         "//test/mocks/buffer:buffer_mocks",
         "//test/mocks/event:event_mocks",
+        "//test/mocks/network:io_handle_mocks",
         "//test/mocks/network:network_mocks",
         "//test/mocks/stats:stats_mocks",
         "//test/test_common:environment_lib",
@@ -286,10 +287,8 @@ envoy_cc_test(
 envoy_cc_test(
     name = "udp_listener_impl_batch_writer_test",
     srcs = ["udp_listener_impl_batch_writer_test.cc"],
-    tags = [
-        # Skipping as quiche quic_gso_batch_writer.h does not exist on Windows
-        "skip_on_windows",
-    ],
+    # Skipping as quiche quic_gso_batch_writer.h does not exist on Windows
+    tags = ["skip_on_windows"],
     deps = [
         ":udp_listener_impl_test_base_lib",
         "//source/common/event:dispatcher_lib",
