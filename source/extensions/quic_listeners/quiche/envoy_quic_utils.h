@@ -57,7 +57,12 @@ std::unique_ptr<T> quicHeadersToEnvoyHeaders(
           validator == nullptr ? HeaderValidationResult::ACCEPT : validator(entry.first, value);
       if (result == HeaderValidationResult::ACCEPT) {
         // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
-        headers->addCopy(Http::LowerCaseString(entry.first), value);
+        auto key = Http::LowerCaseString(entry.first);
+        if (key != Http::Headers::get().Cookie) {
+          headers->addCopy(key, value);
+        } else {
+          headers->appendCopy(key, value);
+        }
       } else if (result == HeaderValidationResult::INVALID) {
         return nullptr;
       }
