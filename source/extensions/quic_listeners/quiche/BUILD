@@ -109,7 +109,6 @@ envoy_cc_library(
         ":envoy_quic_proof_verifier_base_lib",
         ":envoy_quic_utils_lib",
         "//source/extensions/transport_sockets/tls:context_lib",
-        "//source/extensions/transport_sockets/tls/cert_validator:cert_validator_lib",
     ],
 )
 
@@ -138,6 +137,29 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
+    name = "client_connection_factory_lib",
+    srcs = ["client_connection_factory_impl.cc"],
+    hdrs = ["client_connection_factory_impl.h"],
+    tags = ["nofips"],
+    deps = [
+        ":active_quic_listener_lib",
+        ":envoy_quic_alarm_factory_lib",
+        ":envoy_quic_client_session_lib",
+        ":envoy_quic_connection_helper_lib",
+        ":envoy_quic_proof_verifier_lib",
+        ":envoy_quic_server_session_lib",
+        ":envoy_quic_utils_lib",
+        "//include/envoy/http:codec_interface",
+        "//include/envoy/registry",
+        "//source/common/http/http3:quic_client_connection_factory_lib",
+        "//source/common/http/http3:quic_codec_factory_lib",
+        "//source/common/http/http3:well_known_names",
+        "//source/extensions/transport_sockets/tls:ssl_socket_lib",
+        "@com_googlesource_quiche//:quic_core_http_spdy_session_lib",
+    ],
+)
+
+envoy_cc_library(
     name = "codec_lib",
     srcs = ["codec_impl.cc"],
     hdrs = ["codec_impl.h"],
@@ -146,6 +168,7 @@ envoy_cc_library(
     deps = [
         ":envoy_quic_client_session_lib",
         ":envoy_quic_server_session_lib",
+        ":envoy_quic_utils_lib",
         "//include/envoy/http:codec_interface",
         "//include/envoy/registry",
         "//source/common/http/http3:quic_codec_factory_lib",
@@ -356,10 +379,19 @@ envoy_cc_library(
     ],
 )
 
-envoy_cc_library(
+envoy_cc_extension(
     name = "quic_transport_socket_factory_lib",
     srcs = ["quic_transport_socket_factory.cc"],
     hdrs = ["quic_transport_socket_factory.h"],
+    category = (
+        "envoy.transport_sockets.downstream",
+        "envoy.transport_sockets.upstream",
+    ),
+    # Needed to verify that a quic specific configuration is used for quic transport socket.
+    extra_visibility = [
+        "//source/server:__subpackages__",
+    ],
+    security_posture = "unknown",
     tags = ["nofips"],
     visibility = ["//test:__subpackages__"],
     deps = [
@@ -377,9 +409,12 @@ envoy_cc_library(
 # All of these are needed for this extension to function.
 envoy_cc_extension(
     name = "quic_factory_lib",
+    category = (
+        "envoy.transport_sockets.downstream",
+        "envoy.transport_sockets.upstream",
+    ),
     security_posture = "unknown",
     tags = ["nofips"],
-
     # QUICHE can't build against FIPS BoringSSL until the FIPS build
     # is on a new enough version to have QUIC support. Remove it from
     # the build until then. Re-enable as part of #7433.

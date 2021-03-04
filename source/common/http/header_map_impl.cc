@@ -429,7 +429,9 @@ void HeaderMapImpl::appendCopy(const LowerCaseString& key, absl::string_view val
   auto entry = getExisting(key);
   if (!entry.empty()) {
     const std::string delimiter = (key == Http::Headers::get().Cookie ? "; " : ",");
-    const uint64_t added_size = appendToHeader(entry[0]->value(), value, delimiter);
+    const uint64_t added_size = header_map_correctly_coalesce_cookies_
+                                    ? appendToHeader(entry[0]->value(), value, delimiter)
+                                    : appendToHeader(entry[0]->value(), value);
     addSize(added_size);
   } else {
     addCopy(key, value);

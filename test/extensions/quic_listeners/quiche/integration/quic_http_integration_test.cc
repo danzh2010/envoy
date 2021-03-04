@@ -48,11 +48,65 @@ void updateResource(AtomicFileUpdater& updater, double pressure) {
   updater.update(absl::StrCat(pressure));
 }
 
+std::unique_ptr<QuicClientTransportSocketFactory>
+createQuicClientTransportSocketFactory(const Ssl::ClientSslTransportOptions& options, Api::Api& api,
+                                       const std::string& san_to_match) {
+  std::string yaml_plain = R"EOF(
+  common_tls_context:
+    validation_context:
+      trusted_ca:
+        filename: "{{ test_rundir }}/test/config/integration/certs/cacert.pem"
+)EOF";
+  envoy::extensions::transport_sockets::quic::v3::QuicUpstreamTransport
+      quic_transport_socket_config;
+  auto* tls_context = quic_transport_socket_config.mutable_upstream_tls_context();
+  TestUtility::loadFromYaml(TestEnvironment::substitute(yaml_plain), *tls_context);
+  auto* common_context = tls_context->mutable_common_tls_context();
+
+  if (options.alpn_) {
+    common_context->add_alpn_protocols("h3");
+  }
+  if (options.san_) {
+    common_context->mutable_validation_context()->add_match_subject_alt_names()->set_exact(
+        san_to_match);
+  }
+  for (const std::string& cipher_suite : options.cipher_suites_) {
+    common_context->mutable_tls_params()->add_cipher_suites(cipher_suite);
+  }
+  if (!options.sni_.empty()) {
+    tls_context->set_sni(options.sni_);
+  }
+
+  common_context->mutable_tls_params()->set_tls_minimum_protocol_version(options.tls_version_);
+  common_context->mutable_tls_params()->set_tls_maximum_protocol_version(options.tls_version_);
+
+  envoy::config::core::v3::TransportSocket message;
+  message.mutable_typed_config()->PackFrom(quic_transport_socket_config);
+  auto& config_factory = Config::Utility::getAndCheckFactory<
+      Server::Configuration::UpstreamTransportSocketConfigFactory>(message);
+  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
+  ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(api));
+  return std::unique_ptr<QuicClientTransportSocketFactory>(
+      static_cast<QuicClientTransportSocketFactory*>(
+          config_factory
+              .createTransportSocketFactory(quic_transport_socket_config, mock_factory_ctx)
+              .release()));
+}
+
 class QuicHttpIntegrationTest : public HttpIntegrationTest, public QuicMultiVersionTest {
 public:
   QuicHttpIntegrationTest()
       : HttpIntegrationTest(Http::CodecClient::Type::HTTP3, GetParam().first,
                             ConfigHelper::quicHttpProxyConfig()),
+        supported_versions_([]() {
+          if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
+            return quic::CurrentSupportedVersionsWithQuicCrypto();
+          }
+          bool use_http3 = GetParam().second == QuicVersionType::Iquic;
+          SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
+          return quic::CurrentSupportedVersions();
+        }()),
+        conn_helper_(*dispatcher_), alarm_factory_(*dispatcher_, *conn_helper_.GetClock()),
         injected_resource_filename_1_(TestEnvironment::temporaryPath("injected_resource_1")),
         injected_resource_filename_2_(TestEnvironment::temporaryPath("injected_resource_2")),
         file_updater_1_(injected_resource_filename_1_),
@@ -67,7 +121,12 @@ public:
     }
   }
 
-  ~QuicHttpIntegrationTest() override { cleanupUpstreamAndDownstream(); }
+  ~QuicHttpIntegrationTest() override {
+    cleanupUpstreamAndDownstream();
+    // Release the client before destroying |conn_helper_|. No such need once |conn_helper_| is
+    // moved into a client connection factory in the base test class.
+    codec_client_.reset();
+  }
 
   // This call may fail because of INVALID_VERSION, because QUIC connection doesn't support
   // in-connection version negotiation.
@@ -82,6 +141,7 @@ public:
     if (!codec->disconnected()) {
       codec->setCodecClientCallbacks(client_codec_callback_);
     }
+    EXPECT_EQ(server_id_.host(), codec->connection()->requestedServerName());
     return codec;
   }
 
@@ -104,11 +164,11 @@ public:
         resource_monitors:
           - name: "envoy.resource_monitors.injected_resource_1"
             typed_config:
-              "@type": type.googleapis.com/envoy.config.resource_monitor.injected_resource.v2alpha.InjectedResourceConfig
+              "@type": type.googleapis.com/envoy.extensions.resource_monitors.injected_resource.v3.InjectedResourceConfig
               filename: "{}"
           - name: "envoy.resource_monitors.injected_resource_2"
             typed_config:
-              "@type": type.googleapis.com/envoy.config.resource_monitor.injected_resource.v2alpha.InjectedResourceConfig
+              "@type": type.googleapis.com/envoy.extensions.resource_monitors.injected_resource.v3.InjectedResourceConfig
               filename: "{}"
         actions:
           - name: "envoy.overload_actions.stop_accepting_requests"
@@ -199,9 +259,6 @@ TEST_P(QuicHttpIntegrationTest, GetRequestAndEmptyResponse) {
 }
 
 TEST_P(QuicHttpIntegrationTest, GetRequestAndResponseWithBody) {
-  // Use the old nodelay in a random test for coverage. nodelay is a no-op for QUIC.
-  config_helper_.addRuntimeOverride("envoy.reloadable_features.always_nodelay", "false");
-
   initialize();
   sendRequestAndVerifyResponse(default_request_headers_, /*request_size=*/0,
                                default_response_headers_, /*response_size=*/1024,
@@ -419,7 +476,8 @@ TEST_P(QuicHttpIntegrationTest, CertVerificationFailure) {
       GetParam().second == QuicVersionType::GquicQuicCrypto
           ? "QUIC_PROOF_INVALID with details: Proof invalid: X509_verify_cert: certificate "
             "verification error at depth 0: ok"
-          : "QUIC_HANDSHAKE_FAILED with details: TLS handshake failure (ENCRYPTION_HANDSHAKE) 46: "
+          : "QUIC_TLS_CERTIFICATE_UNKNOWN with details: TLS handshake failure "
+            "(ENCRYPTION_HANDSHAKE) 46: "
             "certificate unknown";
   EXPECT_EQ(failure_reason, codec_client_->connection()->transportFailureReason());
 }
@@ -462,6 +520,39 @@ TEST_P(QuicHttpIntegrationTest, Reset101SwitchProtocolResponse) {
   response->waitForReset();
   codec_client_->close();
   EXPECT_FALSE(response->complete());
+}
+
+TEST_P(QuicHttpIntegrationTest, MultipleSetCookieAndCookieHeaders) {
+  initialize();
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+  auto encoder_decoder =
+      codec_client_->startRequest(Http::TestRequestHeaderMapImpl{{":method", "GET"},
+                                                                 {":path", "/dynamo/url"},
+                                                                 {":scheme", "http"},
+                                                                 {":authority", "host"},
+                                                                 {"cookie", "a=b"},
+                                                                 {"cookie", "c=d"}});
+  request_encoder_ = &encoder_decoder.first;
+  auto response = std::move(encoder_decoder.second);
+  codec_client_->sendData(*request_encoder_, 0, true);
+  waitForNextUpstreamRequest();
+  if (Runtime::runtimeFeatureEnabled(
+          "envoy.reloadable_features.header_map_correctly_coalesce_cookies")) {
+    EXPECT_EQ(upstream_request_->headers().get(Http::Headers::get().Cookie)[0]->value(),
+              "a=b; c=d");
+  }
+
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"},
+                                                                   {"set-cookie", "foo"},
+                                                                   {"set-cookie", "bar"}},
+                                   true);
+  response->waitForEndStream();
+  EXPECT_TRUE(response->complete());
+  const auto out = response->headers().get(Http::LowerCaseString("set-cookie"));
+  ASSERT_EQ(out.size(), 2);
+  ASSERT_EQ(out[0]->value().getStringView(), "foo");
+  ASSERT_EQ(out[1]->value().getStringView(), "bar");
 }
 
 } // namespace Quic

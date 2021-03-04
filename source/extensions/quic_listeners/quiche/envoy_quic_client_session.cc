@@ -13,7 +13,8 @@ EnvoyQuicClientSession::EnvoyQuicClientSession(
     uint32_t send_buffer_limit)
     : QuicFilterManagerConnectionImpl(*connection, dispatcher, send_buffer_limit),
       quic::QuicSpdyClientSession(config, supported_versions, connection.release(), server_id,
-                                  crypto_config, push_promise_index) {
+                                  crypto_config, push_promise_index),
+  host_name_(server_id.host()) {
   // QUICHE requires this to be set before Initialize() but the configured
   // value in Envoy is only accessible after retrieving filter chain
   // during the handshake which is after Initialize().
@@ -27,9 +28,7 @@ EnvoyQuicClientSession::~EnvoyQuicClientSession() {
   quic_connection_ = nullptr;
 }
 
-absl::string_view EnvoyQuicClientSession::requestedServerName() const {
-  return {GetCryptoStream()->crypto_negotiated_params().sni};
-}
+absl::string_view EnvoyQuicClientSession::requestedServerName() const { return host_name_; }
 
 void EnvoyQuicClientSession::connect() {
   dynamic_cast<EnvoyQuicClientConnection*>(quic_connection_)->setUpConnectionSocket();

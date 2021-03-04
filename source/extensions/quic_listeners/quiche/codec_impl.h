@@ -1,3 +1,5 @@
+#pragma once
+
 #include "envoy/http/codec.h"
 #include "envoy/registry/registry.h"
 
@@ -32,10 +34,6 @@ public:
   // Returns true if the session has data to send but queued in connection or
   // stream send buffer.
   bool wantsToWrite() override;
-
-  void runWatermarkCallbacksForEachStream(
-      quic::QuicSmallMap<quic::QuicStreamId, std::unique_ptr<quic::QuicStream>, 10>& stream_map,
-      bool high_watermark);
 
   uint32_t max_headers_kb() const { return max_headers_kb_; }
 

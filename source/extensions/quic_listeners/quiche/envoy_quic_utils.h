@@ -51,6 +51,7 @@ std::unique_ptr<T> quicHeadersToEnvoyHeaders(
     std::function<HeaderValidationResult(const std::string&, const absl::string_view&)> validator) {
   auto headers = T::create();
   for (const auto& entry : header_list) {
+<<<<<<< HEAD
     std::vector<absl::string_view> values = absl::StrSplit(entry.second, '\0');
     for (const absl::string_view& value : values) {
       HeaderValidationResult result =
@@ -66,6 +67,16 @@ std::unique_ptr<T> quicHeadersToEnvoyHeaders(
       } else if (result == HeaderValidationResult::INVALID) {
         return nullptr;
       }
+=======
+    auto key = Http::LowerCaseString(entry.first);
+    if (key != Http::Headers::get().Cookie) {
+      // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
+      headers->addCopy(key, entry.second);
+    } else {
+      // QUICHE breaks "cookie" header into crumbs. Coalesce them by appending current one to
+      // existing one if there is any.
+      headers->appendCopy(key, entry.second);
+>>>>>>> master
     }
   }
 
