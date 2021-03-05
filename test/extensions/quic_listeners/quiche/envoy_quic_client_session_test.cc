@@ -115,7 +115,8 @@ public:
                             quic::QuicServerId("example.com", 443, false), &crypto_config_, nullptr,
                             *dispatcher_,
                             /*send_buffer_limit*/ 1024 * 1024),
-        http_connection_(envoy_quic_session_, http_connection_callbacks_) {
+        http_connection_(envoy_quic_session_, http_connection_callbacks_,
+                         Http::DEFAULT_MAX_REQUEST_HEADERS_KB, 0) {
     EXPECT_EQ(time_system_.systemTime(), envoy_quic_session_.streamInfo().startTime());
     EXPECT_EQ(EMPTY_STRING, envoy_quic_session_.nextProtocol());
     EXPECT_EQ(Http::Protocol::Http3, http_connection_.protocol());
@@ -137,8 +138,8 @@ public:
 
   void TearDown() override {
     if (quic_connection_->connected()) {
-      EXPECT_CALL(*quic_connection_,
-                  SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+      EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                               "Closed by application"));
       EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
       envoy_quic_session_.close(Network::ConnectionCloseType::NoFlush);
     }
@@ -223,6 +224,7 @@ TEST_P(EnvoyQuicClientSessionTest, OnGoAwayFrame) {
     envoy_quic_session_.OnHttp3GoAway(4u);
   } else {
     quic::QuicGoAwayFrame goaway;
+    goaway.error_code = quic::QUIC_PEER_GOING_AWAY;
     quic_connection_->OnGoAwayFrame(goaway);
   }
 }
@@ -244,8 +246,8 @@ TEST_P(EnvoyQuicClientSessionTest, ConnectionCloseWithActiveStream) {
   Http::MockResponseDecoder response_decoder;
   Http::MockStreamCallbacks stream_callbacks;
   EnvoyQuicClientStream& stream = sendGetRequest(response_decoder, stream_callbacks);
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   envoy_quic_session_.close(Network::ConnectionCloseType::NoFlush);

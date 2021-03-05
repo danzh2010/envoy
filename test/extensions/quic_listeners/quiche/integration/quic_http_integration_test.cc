@@ -5,7 +5,6 @@
 #include "envoy/config/bootstrap/v3/bootstrap.pb.h"
 #include "envoy/config/overload/v3/overload.pb.h"
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
-#include "envoy/extensions/transport_sockets/quic/v3/quic_transport.pb.h"
 
 #include "test/config/utility.h"
 #include "test/integration/http_integration.h"
@@ -48,65 +47,11 @@ void updateResource(AtomicFileUpdater& updater, double pressure) {
   updater.update(absl::StrCat(pressure));
 }
 
-std::unique_ptr<QuicClientTransportSocketFactory>
-createQuicClientTransportSocketFactory(const Ssl::ClientSslTransportOptions& options, Api::Api& api,
-                                       const std::string& san_to_match) {
-  std::string yaml_plain = R"EOF(
-  common_tls_context:
-    validation_context:
-      trusted_ca:
-        filename: "{{ test_rundir }}/test/config/integration/certs/cacert.pem"
-)EOF";
-  envoy::extensions::transport_sockets::quic::v3::QuicUpstreamTransport
-      quic_transport_socket_config;
-  auto* tls_context = quic_transport_socket_config.mutable_upstream_tls_context();
-  TestUtility::loadFromYaml(TestEnvironment::substitute(yaml_plain), *tls_context);
-  auto* common_context = tls_context->mutable_common_tls_context();
-
-  if (options.alpn_) {
-    common_context->add_alpn_protocols("h3");
-  }
-  if (options.san_) {
-    common_context->mutable_validation_context()->add_match_subject_alt_names()->set_exact(
-        san_to_match);
-  }
-  for (const std::string& cipher_suite : options.cipher_suites_) {
-    common_context->mutable_tls_params()->add_cipher_suites(cipher_suite);
-  }
-  if (!options.sni_.empty()) {
-    tls_context->set_sni(options.sni_);
-  }
-
-  common_context->mutable_tls_params()->set_tls_minimum_protocol_version(options.tls_version_);
-  common_context->mutable_tls_params()->set_tls_maximum_protocol_version(options.tls_version_);
-
-  envoy::config::core::v3::TransportSocket message;
-  message.mutable_typed_config()->PackFrom(quic_transport_socket_config);
-  auto& config_factory = Config::Utility::getAndCheckFactory<
-      Server::Configuration::UpstreamTransportSocketConfigFactory>(message);
-  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
-  ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(api));
-  return std::unique_ptr<QuicClientTransportSocketFactory>(
-      static_cast<QuicClientTransportSocketFactory*>(
-          config_factory
-              .createTransportSocketFactory(quic_transport_socket_config, mock_factory_ctx)
-              .release()));
-}
-
 class QuicHttpIntegrationTest : public HttpIntegrationTest, public QuicMultiVersionTest {
 public:
   QuicHttpIntegrationTest()
       : HttpIntegrationTest(Http::CodecClient::Type::HTTP3, GetParam().first,
                             ConfigHelper::quicHttpProxyConfig()),
-        supported_versions_([]() {
-          if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
-            return quic::CurrentSupportedVersionsWithQuicCrypto();
-          }
-          bool use_http3 = GetParam().second == QuicVersionType::Iquic;
-          SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
-          return quic::CurrentSupportedVersions();
-        }()),
-        conn_helper_(*dispatcher_), alarm_factory_(*dispatcher_, *conn_helper_.GetClock()),
         injected_resource_filename_1_(TestEnvironment::temporaryPath("injected_resource_1")),
         injected_resource_filename_2_(TestEnvironment::temporaryPath("injected_resource_2")),
         file_updater_1_(injected_resource_filename_1_),
@@ -116,7 +61,6 @@ public:
     } else {
       bool use_http3 = GetParam().second == QuicVersionType::Iquic;
       SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
-      SetQuicReloadableFlag(quic_disable_version_draft_27, !use_http3);
       supported_versions_ = quic::CurrentSupportedVersions();
     }
   }
@@ -140,8 +84,8 @@ public:
         HttpIntegrationTest::makeRawHttpConnection(std::move(conn), http2_options);
     if (!codec->disconnected()) {
       codec->setCodecClientCallbacks(client_codec_callback_);
+      EXPECT_EQ(server_id_.host(), codec->connection()->requestedServerName());
     }
-    EXPECT_EQ(server_id_.host(), codec->connection()->requestedServerName());
     return codec;
   }
 

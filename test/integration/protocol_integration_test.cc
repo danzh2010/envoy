@@ -60,11 +60,10 @@ void setDoNotValidateRouteConfig(
     return;                                                                                        \
   }
 
-#define EXCLUDE_DOWNSTREAM_HTTP3                                                                     \
-  if (downstreamProtocol() == FakeHttpConnection::Type::HTTP3) {                                     \
+#define EXCLUDE_DOWNSTREAM_HTTP3                                                                   \
+  if (downstreamProtocol() == Http::CodecClient::Type::HTTP3) {                                    \
     return;                                                                                        \
   }
-
 
 TEST_P(ProtocolIntegrationTest, TrailerSupportHttp1) {
   config_helper_.addConfigModifier(setEnableDownstreamTrailersHttp1());
@@ -207,8 +206,8 @@ typed_config:
 
 // Verifies behavior for https://github.com/envoyproxy/envoy/pull/11248
 TEST_P(ProtocolIntegrationTest, AddBodyToRequestAndWaitForIt) {
-    // QUICHE can't guarantee headers and FIN to be delivered together, so
-    // headers-only request can't be detected at L7 filters.
+  // QUICHE can't guarantee headers and FIN to be delivered together, so
+  // headers-only request can't be detected at L7 filters.
   EXCLUDE_DOWNSTREAM_HTTP3;
 
   // filters are prepended, so add them in reverse order
@@ -400,8 +399,8 @@ TEST_P(DownstreamProtocolIntegrationTest, DownstreamRequestWithFaultyFilter) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, FaultyFilterWithConnect) {
-    // TODO(danzh) re-enable after plumbing through http2 option
-    // "allow_connect".
+  // TODO(danzh) re-enable after plumbing through http2 option
+  // "allow_connect".
   EXCLUDE_DOWNSTREAM_HTTP3;
   // Faulty filter that removed host in a CONNECT request.
   config_helper_.addConfigModifier(
@@ -763,6 +762,10 @@ TEST_P(DownstreamProtocolIntegrationTest, RetryAttemptCountHeader) {
 // The retry priority will always target P1, which would otherwise never be hit due to P0 being
 // healthy.
 TEST_P(DownstreamProtocolIntegrationTest, RetryPriority) {
+  if (upstreamProtocol() == FakeHttpConnection::Type::HTTP2 &&
+      downstreamProtocol() == Http::CodecClient::Type::HTTP3) {
+    return;
+  }
   const Upstream::HealthyLoad healthy_priority_load({0u, 100u});
   const Upstream::DegradedLoad degraded_priority_load({0u, 100u});
   NiceMock<Upstream::MockRetryPriority> retry_priority(healthy_priority_load,
@@ -1365,6 +1368,7 @@ TEST_P(DownstreamProtocolIntegrationTest, LargeCookieParsingMany) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, InvalidContentLength) {
+  quic::SetVerbosityLogThreshold(1);
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
@@ -1741,11 +1745,9 @@ TEST_P(ProtocolIntegrationTest, LargeRequestMethod) {
 // Tests StopAllIterationAndBuffer. Verifies decode-headers-return-stop-all-filter calls decodeData
 // once after iteration is resumed.
 TEST_P(DownstreamProtocolIntegrationTest, TestDecodeHeadersReturnsStopAll) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    // Enable after setting QUICHE stream initial flow control window from http2
-    // options.
-    return;
-  }
+  // Enable after setting QUICHE stream initial flow control window from http2
+  // options.
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addFilter(R"EOF(
 name: call-decodedata-once-filter
 )EOF");
@@ -1797,9 +1799,7 @@ name: passthrough-filter
 // Tests StopAllIterationAndWatermark. decode-headers-return-stop-all-watermark-filter sets buffer
 // limit to 100. Verifies data pause when limit is reached, and resume after iteration continues.
 TEST_P(DownstreamProtocolIntegrationTest, TestDecodeHeadersReturnsStopAllWatermark) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addFilter(R"EOF(
 name: decode-headers-return-stop-all-filter
 )EOF");
@@ -1858,11 +1858,9 @@ name: passthrough-filter
 
 // Test two filters that return StopAllIterationAndBuffer back-to-back.
 TEST_P(DownstreamProtocolIntegrationTest, TestTwoFiltersDecodeHeadersReturnsStopAll) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    // TODO(danzh) Re-enable after codec buffer can be set according to http2
-    // options.
-    return;
-  }
+  // TODO(danzh) Re-enable after codec buffer can be set according to http2
+  // options.
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addFilter(R"EOF(
 name: decode-headers-return-stop-all-filter
 )EOF");
@@ -1911,11 +1909,8 @@ name: passthrough-filter
 
 // Tests encodeHeaders() returns StopAllIterationAndBuffer.
 TEST_P(DownstreamProtocolIntegrationTest, TestEncodeHeadersReturnsStopAll) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    // TODO(danzh) Re-enable after codec buffer can be set according to http2
-    // options.
-    return;
-  }
+  // TODO(danzh) Re-enable after codec buffer can be set according to quic options.
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addFilter(R"EOF(
 name: encode-headers-return-stop-all-filter
 )EOF");
@@ -1948,6 +1943,7 @@ name: encode-headers-return-stop-all-filter
 
 // Tests encodeHeaders() returns StopAllIterationAndWatermark.
 TEST_P(DownstreamProtocolIntegrationTest, TestEncodeHeadersReturnsStopAllWatermark) {
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addFilter(R"EOF(
 name: encode-headers-return-stop-all-filter
 )EOF");

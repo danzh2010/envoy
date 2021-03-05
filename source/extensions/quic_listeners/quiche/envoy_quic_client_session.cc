@@ -14,7 +14,7 @@ EnvoyQuicClientSession::EnvoyQuicClientSession(
     : QuicFilterManagerConnectionImpl(*connection, dispatcher, send_buffer_limit),
       quic::QuicSpdyClientSession(config, supported_versions, connection.release(), server_id,
                                   crypto_config, push_promise_index),
-  host_name_(server_id.host()) {
+      host_name_(server_id.host()) {
   // QUICHE requires this to be set before Initialize() but the configured
   // value in Envoy is only accessible after retrieving filter chain
   // during the handshake which is after Initialize().

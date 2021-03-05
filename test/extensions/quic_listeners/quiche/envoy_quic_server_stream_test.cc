@@ -57,7 +57,9 @@ public:
         quic_session_(quic_config_, {quic_version_}, &quic_connection_, *dispatcher_,
                       quic_config_.GetInitialStreamFlowControlWindowToSend() * 2),
         stream_id_(VersionUsesHttp3(quic_version_.transport_version) ? 4u : 5u),
-        quic_stream_(new EnvoyQuicServerStream(stream_id_, &quic_session_, quic::BIDIRECTIONAL)),
+        quic_stream_(
+            new EnvoyQuicServerStream(stream_id_, &quic_session_, quic::BIDIRECTIONAL,
+                                      envoy::config::core::v3::HttpProtocolOptions::ALLOW)),
         response_headers_{{":status", "200"}, {"response-key", "response-value"}},
         response_trailers_{{"trailer-key", "trailer-value"}} {
     quic_stream_->setRequestDecoder(stream_decoder_);

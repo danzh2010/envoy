@@ -198,16 +198,22 @@ void EnvoyQuicClientStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
   }
 
   const uint64_t status = Http::Utility::getResponseStatus(*headers);
-  if (status >= 100 && status < 200) {
-    // These are Informational 1xx headers, not the actual response headers.
-    ENVOY_STREAM_LOG(debug, "Received informational response code: {}", *this, status);
-    set_headers_decompressed(false);
-    if (status == 100 && !decoded_100_continue_) {
-      // This is 100 Continue, only decode it once to support Expect:100-Continue header.
-      decoded_100_continue_ = true;
-      response_decoder_->decode100ContinueHeaders(std::move(headers));
+  if (Http::CodeUtility::is1xx(status)) {
+    if (status == enumToInt(Http::Code::SwitchingProtocols)) {
+      // HTTP3 doesn't support the HTTP Upgrade mechanism or 101 (Switching Protocols) status code.
+      Reset(quic::QUIC_BAD_APPLICATION_PAYLOAD);
+      return;
     }
-  } else {
+
+    // These are Informational 1xx headers, not the actual response headers.
+    set_headers_decompressed(false);
+  }
+
+  if (status == enumToInt(Http::Code::Continue) && !decoded_100_continue_) {
+    // This is 100 Continue, only decode it once to support Expect:100-Continue header.
+    decoded_100_continue_ = true;
+    response_decoder_->decode100ContinueHeaders(std::move(headers));
+  } else if (status != enumToInt(Http::Code::Continue)) {
     response_decoder_->decodeHeaders(std::move(headers),
                                      /*end_stream=*/fin);
   }

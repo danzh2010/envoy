@@ -51,32 +51,21 @@ std::unique_ptr<T> quicHeadersToEnvoyHeaders(
     std::function<HeaderValidationResult(const std::string&, const absl::string_view&)> validator) {
   auto headers = T::create();
   for (const auto& entry : header_list) {
-<<<<<<< HEAD
-    std::vector<absl::string_view> values = absl::StrSplit(entry.second, '\0');
-    for (const absl::string_view& value : values) {
-      HeaderValidationResult result =
-          validator == nullptr ? HeaderValidationResult::ACCEPT : validator(entry.first, value);
-      if (result == HeaderValidationResult::ACCEPT) {
-        // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
-        auto key = Http::LowerCaseString(entry.first);
-        if (key != Http::Headers::get().Cookie) {
-          headers->addCopy(key, value);
-        } else {
-          headers->appendCopy(key, value);
-        }
-      } else if (result == HeaderValidationResult::INVALID) {
-        return nullptr;
-      }
-=======
     auto key = Http::LowerCaseString(entry.first);
-    if (key != Http::Headers::get().Cookie) {
-      // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
-      headers->addCopy(key, entry.second);
-    } else {
-      // QUICHE breaks "cookie" header into crumbs. Coalesce them by appending current one to
-      // existing one if there is any.
-      headers->appendCopy(key, entry.second);
->>>>>>> master
+    HeaderValidationResult result = validator == nullptr ? HeaderValidationResult::ACCEPT
+                                                         : validator(entry.first, entry.second);
+    if (result == HeaderValidationResult::ACCEPT) {
+      absl::string_view value = entry.second;
+      if (key != Http::Headers::get().Cookie) {
+        // TODO(danzh): Avoid copy by referencing entry as header_list is already validated by QUIC.
+        headers->addCopy(key, value);
+      } else {
+        // QUICHE breaks "cookie" header into crumbs. Coalesce them by appending current one to
+        // existing one if there is any.
+        headers->appendCopy(key, value);
+      }
+    } else if (result == HeaderValidationResult::INVALID) {
+      return nullptr;
     }
   }
 

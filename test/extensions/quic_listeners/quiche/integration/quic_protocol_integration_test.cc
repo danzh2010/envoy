@@ -6,9 +6,8 @@ namespace Envoy {
 INSTANTIATE_TEST_SUITE_P(Protocols, DownstreamProtocolIntegrationTest,
                          testing::ValuesIn(HttpProtocolIntegrationTest::getProtocolTestParams(
                              {Http::CodecClient::Type::HTTP3},
-                             {FakeHttpConnection::Type::HTTP2})),
+                             {FakeHttpConnection::Type::HTTP1, FakeHttpConnection::Type::HTTP2})),
                          HttpProtocolIntegrationTest::protocolTestParamsToString);
-
 
 // This will run with HTTP/1 and HTTP/2 downstream, and HTTP/3 upstream.
 INSTANTIATE_TEST_SUITE_P(Protocols, ProtocolIntegrationTest,

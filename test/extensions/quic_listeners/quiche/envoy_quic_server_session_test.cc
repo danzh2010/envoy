@@ -221,8 +221,9 @@ public:
     EXPECT_EQ(&read_total_, &quic_connection_->connectionStats().read_total_);
     EXPECT_CALL(*read_filter_, onNewConnection()).WillOnce(Invoke([this]() {
       // Create ServerConnection instance and setup callbacks for it.
-      http_connection_ = std::make_unique<QuicHttpServerConnectionImpl>(envoy_quic_session_,
-                                                                        http_connection_callbacks_);
+      http_connection_ = std::make_unique<QuicHttpServerConnectionImpl>(
+          envoy_quic_session_, http_connection_callbacks_, Http::DEFAULT_MAX_REQUEST_HEADERS_KB, 0,
+          envoy::config::core::v3::HttpProtocolOptions::ALLOW);
       EXPECT_EQ(Http::Protocol::Http3, http_connection_->protocol());
       // Stop iteration to avoid calling getRead/WriteBuffer().
       return Network::FilterStatus::StopIteration;
@@ -245,8 +246,8 @@ public:
 
   void TearDown() override {
     if (quic_connection_->connected()) {
-      EXPECT_CALL(*quic_connection_,
-                  SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+      EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                               "Closed by application"));
       EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
       EXPECT_CALL(*quic_connection_, SendControlFrame(_))
           .Times(testing::AtMost(1))
@@ -409,8 +410,8 @@ TEST_P(EnvoyQuicServerSessionTest, ConnectionCloseWithActiveStream) {
   Http::MockRequestDecoder request_decoder;
   Http::MockStreamCallbacks stream_callbacks;
   quic::QuicStream* stream = createNewStream(request_decoder, stream_callbacks);
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   envoy_quic_session_.close(Network::ConnectionCloseType::NoFlush);
@@ -425,8 +426,8 @@ TEST_P(EnvoyQuicServerSessionTest, NoFlushWithDataToWrite) {
   Http::MockStreamCallbacks stream_callbacks;
   quic::QuicStream* stream = createNewStream(request_decoder, stream_callbacks);
   envoy_quic_session_.MarkConnectionLevelWriteBlocked(stream->id());
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   // Even though the stream is write blocked, connection should be closed
@@ -447,8 +448,8 @@ TEST_P(EnvoyQuicServerSessionTest, FlushCloseWithDataToWrite) {
   // Connection shouldn't be closed right away as there is a stream write blocked.
   envoy_quic_session_.close(Network::ConnectionCloseType::FlushWrite);
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   // Unblock that stream to trigger actual connection close.
@@ -531,8 +532,8 @@ TEST_P(EnvoyQuicServerSessionTest, WriteUpdatesDelayCloseTimer) {
                                  Event::Dispatcher::RunType::NonBlock);
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
 
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   // Advance the time to fire connection close timer.
@@ -622,8 +623,8 @@ TEST_P(EnvoyQuicServerSessionTest, FlushCloseNoTimeout) {
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
 
   // Force close connection.
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   EXPECT_CALL(*quic_connection_, SendControlFrame(_))
@@ -652,8 +653,8 @@ TEST_P(EnvoyQuicServerSessionTest, FlushCloseWithTimeout) {
   envoy_quic_session_.close(Network::ConnectionCloseType::FlushWriteAndDelay);
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
 
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   // Advance the time to fire connection close timer.
@@ -685,8 +686,8 @@ TEST_P(EnvoyQuicServerSessionTest, FlushAndWaitForCloseWithTimeout) {
                                  Event::Dispatcher::RunType::NonBlock);
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
 
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   // Advance the time to fire connection close timer.
@@ -722,8 +723,8 @@ TEST_P(EnvoyQuicServerSessionTest, FlusWriteTransitToFlushWriteWithDelay) {
                                  Event::Dispatcher::RunType::NonBlock);
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
 
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   EXPECT_CALL(stream_callbacks, onResetStream(Http::StreamResetReason::ConnectionTermination, _));
   // Advance the time to fire connection close timer.
@@ -747,8 +748,8 @@ TEST_P(EnvoyQuicServerSessionTest, FlushAndWaitForCloseWithNoPendingData) {
   envoy_quic_session_.close(Network::ConnectionCloseType::FlushWriteAndDelay);
   EXPECT_EQ(Network::Connection::State::Open, envoy_quic_session_.state());
 
-  EXPECT_CALL(*quic_connection_,
-              SendConnectionClosePacket(quic::QUIC_NO_ERROR, _, "Closed by application"));
+  EXPECT_CALL(*quic_connection_, SendConnectionClosePacket(quic::QUIC_CONNECTION_CANCELLED, _,
+                                                           "Closed by application"));
   EXPECT_CALL(network_connection_callbacks_, onEvent(Network::ConnectionEvent::LocalClose));
   // Advance the time to fire connection close timer.
   time_system_.advanceTimeAndRun(std::chrono::milliseconds(90), *dispatcher_,

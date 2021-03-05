@@ -57,7 +57,9 @@ TEST(EnvoyQuicUtilsTest, HeadersConversion) {
   EXPECT_EQ("https", envoy_headers->getSchemeValue());
 
   quic::QuicHeaderList quic_headers = quic::test::AsHeaderList(headers_block);
-  auto envoy_headers2 = quicHeadersToEnvoyHeaders<Http::RequestHeaderMapImpl>(quic_headers);
+  auto envoy_headers2 = quicHeadersToEnvoyHeaders<Http::RequestHeaderMapImpl>(
+      quic_headers,
+      [](const std::string&, const absl::string_view&) { return HeaderValidationResult::ACCEPT; });
   EXPECT_EQ(*envoy_headers, *envoy_headers2);
 }
 

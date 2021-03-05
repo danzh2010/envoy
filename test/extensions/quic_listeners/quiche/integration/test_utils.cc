@@ -1,5 +1,7 @@
 #include "test/extensions/quic_listeners/quiche/integration/test_utils.h"
 
+#include "envoy/extensions/transport_sockets/quic/v3/quic_transport.pb.h"
+
 #include "common/api/api_impl.h"
 
 #include "extensions/quic_listeners/quiche/envoy_quic_client_connection.h"
@@ -24,9 +26,11 @@ TestUtils::createQuicClientTransportSocketFactory(const Ssl::ClientSslTransportO
       trusted_ca:
         filename: "{{ test_rundir }}/test/config/integration/certs/cacert.pem"
 )EOF";
-  envoy::extensions::transport_sockets::tls::v3::UpstreamTlsContext tls_context;
-  TestUtility::loadFromYaml(TestEnvironment::substitute(yaml_plain), tls_context);
-  auto* common_context = tls_context.mutable_common_tls_context();
+  envoy::extensions::transport_sockets::quic::v3::QuicUpstreamTransport
+      quic_transport_socket_config;
+  auto* tls_context = quic_transport_socket_config.mutable_upstream_tls_context();
+  TestUtility::loadFromYaml(TestEnvironment::substitute(yaml_plain), *tls_context);
+  auto* common_context = tls_context->mutable_common_tls_context();
 
   if (options.alpn_) {
     common_context->add_alpn_protocols("h3");
@@ -39,17 +43,23 @@ TestUtils::createQuicClientTransportSocketFactory(const Ssl::ClientSslTransportO
     common_context->mutable_tls_params()->add_cipher_suites(cipher_suite);
   }
   if (!options.sni_.empty()) {
-    tls_context.set_sni(options.sni_);
+    tls_context->set_sni(options.sni_);
   }
 
   common_context->mutable_tls_params()->set_tls_minimum_protocol_version(options.tls_version_);
   common_context->mutable_tls_params()->set_tls_maximum_protocol_version(options.tls_version_);
 
-  testing::NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
+  envoy::config::core::v3::TransportSocket message;
+  message.mutable_typed_config()->PackFrom(quic_transport_socket_config);
+  auto& config_factory = Config::Utility::getAndCheckFactory<
+      Server::Configuration::UpstreamTransportSocketConfigFactory>(message);
+  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
   ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(api));
-  auto cfg = std::make_unique<Extensions::TransportSockets::Tls::ClientContextConfigImpl>(
-      tls_context, options.sigalgs_, mock_factory_ctx);
-  return std::make_unique<Quic::QuicClientTransportSocketFactory>(std::move(cfg));
+  return std::unique_ptr<QuicClientTransportSocketFactory>(
+      static_cast<QuicClientTransportSocketFactory*>(
+          config_factory
+              .createTransportSocketFactory(quic_transport_socket_config, mock_factory_ctx)
+              .release()));
 }
 
 std::unique_ptr<quic::QuicCryptoClientConfig>

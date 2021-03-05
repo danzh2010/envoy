@@ -45,8 +45,7 @@ std::string HttpProtocolIntegrationTest::protocolTestParamsToString(
     break;
   }
   return absl::StrCat((params.param.version == Network::Address::IpVersion::v4 ? "IPv4_" : "IPv6_"),
-                      downstream_protocol,
-                      upstreamToString(params.param.upstream_protocol));
+                      downstream_protocol, upstreamToString(params.param.upstream_protocol));
 }
 
 } // namespace Envoy
