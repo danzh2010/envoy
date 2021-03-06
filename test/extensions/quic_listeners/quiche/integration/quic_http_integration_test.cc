@@ -5,6 +5,7 @@
 #include "envoy/config/bootstrap/v3/bootstrap.pb.h"
 #include "envoy/config/overload/v3/overload.pb.h"
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
+#include "envoy/extensions/transport_sockets/quic/v3/quic_transport.pb.h"
 
 #include "test/config/utility.h"
 #include "test/integration/http_integration.h"
@@ -17,6 +18,8 @@
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
 
+#include "quiche/quic/core/http/quic_client_push_promise_index.h"
+#include "quiche/quic/core/quic_utils.h"
 #include "quiche/quic/test_tools/quic_test_utils.h"
 
 #if defined(__GNUC__)
@@ -25,9 +28,14 @@
 
 #include "extensions/quic_listeners/quiche/envoy_quic_client_session.h"
 #include "extensions/quic_listeners/quiche/envoy_quic_client_connection.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_proof_verifier.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
+#include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
 #include "extensions/quic_listeners/quiche/envoy_quic_packet_writer.h"
 #include "extensions/quic_listeners/quiche/envoy_quic_utils.h"
+#include "extensions/quic_listeners/quiche/quic_transport_socket_factory.h"
 #include "test/extensions/quic_listeners/quiche/test_utils.h"
+#include "extensions/transport_sockets/tls/context_config_impl.h"
 
 namespace Envoy {
 namespace Quic {
@@ -47,29 +55,57 @@ void updateResource(AtomicFileUpdater& updater, double pressure) {
   updater.update(absl::StrCat(pressure));
 }
 
+// A test that sets up its own client connection with customized quic version and connection ID.
 class QuicHttpIntegrationTest : public HttpIntegrationTest, public QuicMultiVersionTest {
 public:
   QuicHttpIntegrationTest()
       : HttpIntegrationTest(Http::CodecClient::Type::HTTP3, GetParam().first,
                             ConfigHelper::quicHttpProxyConfig()),
+        supported_versions_([]() {
+          if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
+            return quic::CurrentSupportedVersionsWithQuicCrypto();
+          }
+          bool use_http3 = GetParam().second == QuicVersionType::Iquic;
+          SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
+          return quic::CurrentSupportedVersions();
+        }()),
+        conn_helper_(*dispatcher_), alarm_factory_(*dispatcher_, *conn_helper_.GetClock()),
         injected_resource_filename_1_(TestEnvironment::temporaryPath("injected_resource_1")),
         injected_resource_filename_2_(TestEnvironment::temporaryPath("injected_resource_2")),
         file_updater_1_(injected_resource_filename_1_),
-        file_updater_2_(injected_resource_filename_2_) {
-    if (GetParam().second == QuicVersionType::GquicQuicCrypto) {
-      supported_versions_ = quic::CurrentSupportedVersionsWithQuicCrypto();
-    } else {
-      bool use_http3 = GetParam().second == QuicVersionType::Iquic;
-      SetQuicReloadableFlag(quic_disable_version_draft_29, !use_http3);
-      supported_versions_ = quic::CurrentSupportedVersions();
-    }
-  }
+        file_updater_2_(injected_resource_filename_2_) {}
 
   ~QuicHttpIntegrationTest() override {
     cleanupUpstreamAndDownstream();
     // Release the client before destroying |conn_helper_|. No such need once |conn_helper_| is
     // moved into a client connection factory in the base test class.
     codec_client_.reset();
+  }
+
+  Network::ClientConnectionPtr makeClientConnectionWithOptions(
+      uint32_t port, const Network::ConnectionSocket::OptionsSharedPtr& options) override {
+    // Setting socket options is not supported.
+    ASSERT(!options);
+    server_addr_ = Network::Utility::resolveUrl(
+        fmt::format("udp://{}:{}", Network::Test::getLoopbackAddressUrlString(version_), port));
+    Network::Address::InstanceConstSharedPtr local_addr =
+        Network::Test::getCanonicalLoopbackAddress(version_);
+    // Initiate a QUIC connection with the highest supported version. If not
+    // supported by server, this connection will fail.
+    // TODO(danzh) Implement retry upon version mismatch and modify test frame work to specify a
+    // different version set on server side to test that.
+    auto connection = std::make_unique<EnvoyQuicClientConnection>(
+        getNextConnectionId(), server_addr_, conn_helper_, alarm_factory_,
+        quic::ParsedQuicVersionVector{supported_versions_[0]}, local_addr, *dispatcher_, nullptr);
+    quic_connection_ = connection.get();
+    ASSERT(quic_transport_socket_factory_ != nullptr);
+    auto session = std::make_unique<EnvoyQuicClientSession>(
+        quic_config_, supported_versions_, std::move(connection),
+        quic::QuicServerId{transport_socket_factory_->clientContextConfig().serverNameIndication(),
+                           static_cast<uint16_t>(server_addr_->ip()->port()), false},
+        crypto_config_.get(), &push_promise_index_, *dispatcher_, 0);
+    session->Initialize();
+    return session;
   }
 
   // This call may fail because of INVALID_VERSION, because QUIC connection doesn't support
@@ -84,14 +120,15 @@ public:
         HttpIntegrationTest::makeRawHttpConnection(std::move(conn), http2_options);
     if (!codec->disconnected()) {
       codec->setCodecClientCallbacks(client_codec_callback_);
-      EXPECT_EQ(server_id_.host(), codec->connection()->requestedServerName());
+      EXPECT_EQ(transport_socket_factory_->clientContextConfig().serverNameIndication(),
+                codec->connection()->requestedServerName());
     }
     return codec;
   }
 
-  quic::QuicConnectionId getNextConnectionId() override {
+  quic::QuicConnectionId getNextConnectionId() {
     if (designated_connection_ids_.empty()) {
-      return HttpIntegrationTest::getNextConnectionId();
+      return quic::QuicUtils::CreateRandomConnectionId();
     }
     quic::QuicConnectionId cid = designated_connection_ids_.front();
     designated_connection_ids_.pop_front();
@@ -100,6 +137,18 @@ public:
 
   void initialize() override {
     config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
+      envoy::extensions::transport_sockets::quic::v3::QuicDownstreamTransport
+          quic_transport_socket_config;
+      auto tls_context = quic_transport_socket_config.mutable_downstream_tls_context();
+      ConfigHelper::initializeTls(ConfigHelper::ServerSslOptions().setRsaCert(true).setTlsV13(true),
+                                  *tls_context->mutable_common_tls_context());
+      auto* filter_chain =
+          bootstrap.mutable_static_resources()->mutable_listeners(0)->mutable_filter_chains(0);
+      auto* transport_socket = filter_chain->mutable_transport_socket();
+      transport_socket->mutable_typed_config()->PackFrom(quic_transport_socket_config);
+
+      bootstrap.mutable_static_resources()->mutable_listeners(0)->set_reuse_port(set_reuse_port_);
+
       const std::string overload_config =
           fmt::format(R"EOF(
         refresh_interval:
@@ -135,9 +184,28 @@ public:
       *bootstrap.mutable_overload_manager() =
           TestUtility::parseYaml<envoy::config::overload::v3::OverloadManager>(overload_config);
     });
+    config_helper_.addConfigModifier(
+        [](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
+               hcm) {
+          hcm.mutable_drain_timeout()->clear_seconds();
+          hcm.mutable_drain_timeout()->set_nanos(500 * 1000 * 1000);
+          EXPECT_EQ(hcm.codec_type(), envoy::extensions::filters::network::http_connection_manager::
+                                          v3::HttpConnectionManager::HTTP3);
+        });
+
     updateResource(file_updater_1_, 0);
     updateResource(file_updater_2_, 0);
     HttpIntegrationTest::initialize();
+    // Latch quic_transport_socket_factory_ which is instantiated in initialize().
+    transport_socket_factory_ =
+        static_cast<QuicClientTransportSocketFactory*>(quic_transport_socket_factory_.get());
+    registerTestServerPorts({"http"});
+
+    ASSERT(&transport_socket_factory_->clientContextConfig());
+
+    crypto_config_ =
+        std::make_unique<quic::QuicCryptoClientConfig>(std::make_unique<EnvoyQuicProofVerifier>(
+            stats_store_, transport_socket_factory_->clientContextConfig(), timeSystem()));
   }
 
   void testMultipleQuicConnections() {
@@ -185,14 +253,21 @@ public:
   }
 
 protected:
+  quic::QuicConfig quic_config_;
+  quic::QuicClientPushPromiseIndex push_promise_index_;
+  quic::ParsedQuicVersionVector supported_versions_;
+  std::unique_ptr<quic::QuicCryptoClientConfig> crypto_config_;
+  EnvoyQuicConnectionHelper conn_helper_;
+  EnvoyQuicAlarmFactory alarm_factory_;
   CodecClientCallbacksForTest client_codec_callback_;
   Network::Address::InstanceConstSharedPtr server_addr_;
-
+  EnvoyQuicClientConnection* quic_connection_{nullptr};
   const std::string injected_resource_filename_1_;
   const std::string injected_resource_filename_2_;
   AtomicFileUpdater file_updater_1_;
   AtomicFileUpdater file_updater_2_;
   std::list<quic::QuicConnectionId> designated_connection_ids_;
+  Quic::QuicClientTransportSocketFactory* transport_socket_factory_{nullptr};
 };
 
 INSTANTIATE_TEST_SUITE_P(QuicHttpIntegrationTests, QuicHttpIntegrationTest,
@@ -318,9 +393,8 @@ TEST_P(QuicHttpIntegrationTest, ConnectionMigration) {
   // Change to a new port by switching socket, and connection should still continue.
   Network::Address::InstanceConstSharedPtr local_addr =
       Network::Test::getCanonicalLoopbackAddress(version_);
-  static_cast<EnvoyQuicClientConnection*>(
-      static_cast<EnvoyQuicClientSession*>(codec_client_->connection())->connection())
-      ->switchConnectionSocket(createConnectionSocket(server_addr_, local_addr, nullptr));
+  quic_connection_->switchConnectionSocket(
+      createConnectionSocket(server_addr_, local_addr, nullptr));
   EXPECT_NE(old_port, local_addr->ip()->port());
   // Send the rest data.
   codec_client_->sendData(*request_encoder_, 1024u, true);
@@ -412,7 +486,7 @@ TEST_P(QuicHttpIntegrationTest, AdminDrainDrainsListeners) {
 }
 
 TEST_P(QuicHttpIntegrationTest, CertVerificationFailure) {
-  quic_client_san_to_match_ = "www.random_domain.com";
+  san_to_match_ = "www.random_domain.com";
   initialize();
   codec_client_ = makeRawHttpConnection(makeClientConnection((lookupPort("http"))), absl::nullopt);
   EXPECT_FALSE(codec_client_->connected());

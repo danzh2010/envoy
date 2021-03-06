@@ -7,27 +7,10 @@
 #include "common/http/codec_client.h"
 #include "common/network/filter_impl.h"
 
-#include "extensions/quic_listeners/quiche/envoy_quic_alarm_factory.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_connection_helper.h"
-
 #include "test/common/http/http2/http2_frame.h"
 #include "test/integration/integration.h"
 #include "test/integration/utility.h"
 #include "test/test_common/printers.h"
-
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#pragma GCC diagnostic ignored "-Winvalid-offsetof"
-#endif
-
-#include "quiche/quic/core/http/quic_client_push_promise_index.h"
-#include "quiche/quic/core/quic_server_id.h"
-#include "quiche/quic/core/crypto/quic_crypto_client_config.h"
-
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
 
 namespace Envoy {
 
@@ -264,8 +247,6 @@ protected:
   // Prefix listener stat with IP:port, including IP version dependent loopback address.
   std::string listenerStatPrefix(const std::string& stat_name);
 
-  virtual quic::QuicConnectionId getNextConnectionId();
-
   // The client making requests to Envoy.
   IntegrationCodecClientPtr codec_client_;
   // A placeholder for the first upstream connection.
@@ -286,15 +267,8 @@ protected:
   testing::NiceMock<Random::MockRandomGenerator> random_;
 
   bool set_reuse_port_{false};
-
-  quic::QuicConfig quic_config_;
-  quic::QuicServerId server_id_{"lyft.com", 443, false};
-  quic::QuicClientPushPromiseIndex push_promise_index_;
-  quic::ParsedQuicVersionVector supported_versions_;
-  std::unique_ptr<quic::QuicCryptoClientConfig> crypto_config_;
-  Quic::EnvoyQuicConnectionHelper conn_helper_;
-  Quic::EnvoyQuicAlarmFactory alarm_factory_;
-  std::string quic_client_san_to_match_{"spiffe://lyft.com/backend-team"};
+  std::string san_to_match_{"spiffe://lyft.com/backend-team"};
+  Network::TransportSocketFactoryPtr quic_transport_socket_factory_;
 };
 
 // Helper class for integration tests using raw HTTP/2 frames

@@ -21,23 +21,18 @@
 #include "common/common/fmt.h"
 #include "common/common/thread_annotations.h"
 #include "common/http/headers.h"
+#include "common/http/http3/quic_client_connection_factory.h"
 #include "common/network/socket_option_impl.h"
 #include "common/network/utility.h"
 #include "common/protobuf/utility.h"
 #include "common/runtime/runtime_impl.h"
 #include "common/upstream/upstream_impl.h"
 
-#include "extensions/quic_listeners/quiche/active_quic_listener_config.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_client_connection.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_client_session.h"
-#include "extensions/quic_listeners/quiche/envoy_quic_proof_verifier.h"
-#include "extensions/quic_listeners/quiche/quic_transport_socket_factory.h"
 #include "extensions/transport_sockets/tls/context_config_impl.h"
 #include "extensions/transport_sockets/tls/context_impl.h"
 #include "extensions/transport_sockets/tls/ssl_socket.h"
 
 #include "test/common/upstream/utility.h"
-#include "test/extensions/quic_listeners/quiche/integration/test_utils.h"
 #include "test/integration/autonomous_upstream.h"
 #include "test/integration/ssl_utility.h"
 #include "test/integration/test_host_predicate_config.h"
@@ -245,13 +240,10 @@ Network::ClientConnectionPtr HttpIntegrationTest::makeClientConnectionWithOption
       fmt::format("udp://{}:{}", Network::Test::getLoopbackAddressUrlString(version_), port));
   Network::Address::InstanceConstSharedPtr local_addr =
       Network::Test::getCanonicalLoopbackAddress(version_);
-  return Quic::TestUtils::makeClientConnection(
-      supported_versions_, *dispatcher_, server_addr, local_addr, getNextConnectionId(),
-      conn_helper_, alarm_factory_, quic_config_, server_id_, *crypto_config_, push_promise_index_);
-}
-
-quic::QuicConnectionId HttpIntegrationTest::getNextConnectionId() {
-  return quic::QuicUtils::CreateRandomConnectionId();
+  return Config::Utility::getAndCheckFactoryByName<Http::QuicClientConnectionFactory>(
+             Http::QuicCodecNames::get().Quiche)
+      .createQuicNetworkConnection(server_addr, local_addr, *quic_transport_socket_factory_,
+                                   stats_store_, *dispatcher_, timeSystem());
 }
 
 IntegrationCodecClientPtr HttpIntegrationTest::makeHttpConnection(uint32_t port) {
@@ -309,10 +301,7 @@ HttpIntegrationTest::HttpIntegrationTest(Http::CodecClient::Type downstream_prot
                                          Network::Address::IpVersion version,
                                          const std::string& config)
     : BaseIntegrationTest(upstream_address_fn, version, config),
-      downstream_protocol_(downstream_protocol),
-      // Only run the highest currently supported QUIC version.
-      supported_versions_(quic::CurrentSupportedVersions()), conn_helper_(*dispatcher_),
-      alarm_factory_(*dispatcher_, *conn_helper_.GetClock()) {
+      downstream_protocol_(downstream_protocol) {
   // Legacy integration tests expect the default listener to be named "http" for
   // lookupPort calls.
   config_helper_.renameListener("http");
@@ -333,6 +322,8 @@ void HttpIntegrationTest::initialize() {
     return BaseIntegrationTest::initialize();
   }
 
+  quic_transport_socket_factory_ =
+      IntegrationUtil::createQuicClientTransportSocketFactory(*api_, san_to_match_);
   config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
     envoy::extensions::transport_sockets::quic::v3::QuicDownstreamTransport
         quic_transport_socket_config;
@@ -340,7 +331,7 @@ void HttpIntegrationTest::initialize() {
     ConfigHelper::initializeTls(ConfigHelper::ServerSslOptions().setRsaCert(true).setTlsV13(true),
                                 *tls_context->mutable_common_tls_context());
     for (auto& listener : *bootstrap.mutable_static_resources()->mutable_listeners()) {
-      if (listener.udp_listener_config().udp_listener_name() == Quic::QuicListenerName) {
+      if (listener.udp_listener_config().udp_listener_name() == "quiche_quic_listener") {
         auto* filter_chain = listener.mutable_filter_chains(0);
         auto* transport_socket = filter_chain->mutable_transport_socket();
         transport_socket->mutable_typed_config()->PackFrom(quic_transport_socket_config);
@@ -360,8 +351,6 @@ void HttpIntegrationTest::initialize() {
       });
   BaseIntegrationTest::initialize();
   registerTestServerPorts({"http"});
-  crypto_config_ = Quic::TestUtils::createQuicCryptoClientConfig(
-      stats_store_, *api_, quic_client_san_to_match_, timeSystem());
 }
 
 void HttpIntegrationTest::setDownstreamProtocol(Http::CodecClient::Type downstream_protocol) {
@@ -576,12 +565,8 @@ void HttpIntegrationTest::testRouterNotFound() {
   config_helper_.setDefaultHostAndRoute("foo.com", "/found");
   initialize();
 
-  BufferingStreamDecoderPtr response =
-      downstream_protocol_ == Http::CodecClient::Type::HTTP3
-          ? Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/notfound", "",
-                                                    version_)
-          : IntegrationUtil::makeSingleRequest(lookupPort("http"), "GET", "/notfound", "",
-                                               downstream_protocol_, version_);
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/notfound", "", downstream_protocol_, version_);
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("404", response->headers().getStatusValue());
 }
@@ -590,12 +575,8 @@ void HttpIntegrationTest::testRouterNotFound() {
 void HttpIntegrationTest::testRouterNotFoundWithBody() {
   config_helper_.setDefaultHostAndRoute("foo.com", "/found");
   initialize();
-  BufferingStreamDecoderPtr response =
-      downstream_protocol_ == Http::CodecClient::Type::HTTP3
-          ? Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "POST", "/notfound", "foo",
-                                                    version_)
-          : IntegrationUtil::makeSingleRequest(lookupPort("http"), "POST", "/notfound", "foo",
-                                               downstream_protocol_, version_);
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "POST", "/notfound", "foo", downstream_protocol_, version_);
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("404", response->headers().getStatusValue());
 }

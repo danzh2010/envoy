@@ -226,7 +226,7 @@ void EnvoyQuicServerStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
         if (!absl::SimpleAtoi(value, &new_value) || !quiche::QuicheTextUtils::IsAllDigits(value)) {
           ENVOY_STREAM_LOG(debug, "Content length was either unparseable or negative", *this);
           // TODO(danzh) set value according to override_stream_error_on_invalid_http_message from
-          // configured http2 options.
+          // configured http3 options.
           close_connection_upon_invalid_header = true;
           setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
           return HeaderValidationResult::INVALID;
@@ -240,7 +240,7 @@ void EnvoyQuicServerStream::OnInitialHeadersComplete(bool fin, size_t frame_len,
               debug,
               "Parsed content length {} is inconsistent with previously detected content length {}",
               *this, new_value, content_length.value());
-          close_connection_upon_invalid_header = false;
+          close_connection_upon_invalid_header = true;
           setDetails(Http3ResponseCodeDetailValues::invalid_http_header);
           return HeaderValidationResult::INVALID;
         }

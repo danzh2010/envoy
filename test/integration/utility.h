@@ -184,6 +184,9 @@ public:
                     const std::string& body, Http::CodecClient::Type type,
                     Network::Address::IpVersion ip_version, const std::string& host = "host",
                     const std::string& content_type = "");
+
+  static Network::TransportSocketFactoryPtr
+  createQuicClientTransportSocketFactory(Api::Api& api, const std::string& san_to_match);
 };
 
 // A set of connection callbacks which tracks connection state.

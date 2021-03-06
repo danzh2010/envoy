@@ -28,7 +28,6 @@
 
 #include "test/common/http/http2/http2_frame.h"
 #include "test/common/upstream/utility.h"
-#include "test/extensions/quic_listeners/quiche/integration/test_utils.h"
 #include "test/integration/autonomous_upstream.h"
 #include "test/integration/http_integration.h"
 #include "test/integration/test_host_predicate_config.h"
@@ -98,12 +97,8 @@ TEST_P(DownstreamProtocolIntegrationTest, RouterClusterNotFound404) {
   config_helper_.addVirtualHost(host);
   initialize();
 
-  BufferingStreamDecoderPtr response =
-      (downstream_protocol_ <= Http::CodecClient::Type::HTTP2
-           ? IntegrationUtil::makeSingleRequest(lookupPort("http"), "GET", "/unknown", "",
-                                                downstream_protocol_, version_, "foo.com")
-           : Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/unknown", "",
-                                                     version_, "foo.com"));
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("404", response->headers().getStatusValue());
 }
@@ -117,12 +112,8 @@ TEST_P(DownstreamProtocolIntegrationTest, RouterClusterNotFound503) {
   config_helper_.addVirtualHost(host);
   initialize();
 
-  BufferingStreamDecoderPtr response =
-      (downstream_protocol_ <= Http::CodecClient::Type::HTTP2
-           ? IntegrationUtil::makeSingleRequest(lookupPort("http"), "GET", "/unknown", "",
-                                                downstream_protocol_, version_, "foo.com")
-           : Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/unknown", "",
-                                                     version_, "foo.com"));
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/unknown", "", downstream_protocol_, version_, "foo.com");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("503", response->headers().getStatusValue());
 }
@@ -134,12 +125,8 @@ TEST_P(DownstreamProtocolIntegrationTest, RouterRedirect) {
   config_helper_.addVirtualHost(host);
   initialize();
 
-  BufferingStreamDecoderPtr response =
-      (downstream_protocol_ <= Http::CodecClient::Type::HTTP2
-           ? IntegrationUtil::makeSingleRequest(lookupPort("http"), "GET", "/foo", "",
-                                                downstream_protocol_, version_, "www.redirect.com")
-           : Quic::TestUtils::makeSingleHttp3Request(lookupPort("http"), "GET", "/foo", "",
-                                                     version_, "www.redirect.com"));
+  BufferingStreamDecoderPtr response = IntegrationUtil::makeSingleRequest(
+      lookupPort("http"), "GET", "/foo", "", downstream_protocol_, version_, "www.redirect.com");
   ASSERT_TRUE(response->complete());
   EXPECT_EQ("301", response->headers().getStatusValue());
   EXPECT_EQ("https://www.redirect.com/foo",
@@ -257,6 +244,10 @@ TEST_P(ProtocolIntegrationTest, AddBodyToResponseAndWaitForIt) {
 }
 
 TEST_P(ProtocolIntegrationTest, ContinueHeadersOnlyInjectBodyFilter) {
+  // Headers-only request is translated into headers and empty body by QUICHE
+  // because FIN bit in IETF QUIC stream is decoupled with http HEADERS frame.
+  // decodeHeaders() is always called with end_stream = false if QUICHE is
+  // using IETF version.
   EXCLUDE_UPSTREAM_HTTP3;
   config_helper_.addFilter(R"EOF(
   name: continue-headers-only-inject-body-filter
@@ -264,13 +255,6 @@ TEST_P(ProtocolIntegrationTest, ContinueHeadersOnlyInjectBodyFilter) {
     "@type": type.googleapis.com/google.protobuf.Empty
   )EOF");
   initialize();
-  if (downstreamProtocol() == Http::CodecClient::Type::HTTP3) {
-    // Headers-only request is translated into headers and empty body by QUICHE
-    // because FIN bit in IETF QUIC stream is decoupled with http HEADERS frame.
-    // decodeHeaders() is always called with end_stream = false if QUICHE is
-    // using IETF version.
-    return;
-  }
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
 
@@ -1368,7 +1352,6 @@ TEST_P(DownstreamProtocolIntegrationTest, LargeCookieParsingMany) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, InvalidContentLength) {
-  quic::SetVerbosityLogThreshold(1);
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
@@ -1393,9 +1376,8 @@ TEST_P(DownstreamProtocolIntegrationTest, InvalidContentLength) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, InvalidContentLengthAllowed) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+  // TODO(danzh) Add override_stream_error_on_invalid_http_message to http3 protocol options.
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addConfigModifier(
       [](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
              hcm) -> void {
@@ -1435,9 +1417,7 @@ TEST_P(DownstreamProtocolIntegrationTest, InvalidContentLengthAllowed) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, MultipleContentLengths) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+
   initialize();
   codec_client_ = makeHttpConnection(lookupPort("http"));
   auto encoder_decoder =
@@ -1460,6 +1440,8 @@ TEST_P(DownstreamProtocolIntegrationTest, MultipleContentLengths) {
 
 // TODO(PiotrSikora): move this HTTP/2 only variant to http2_integration_test.cc.
 TEST_P(DownstreamProtocolIntegrationTest, MultipleContentLengthsAllowed) {
+  // override_stream_error_on_invalid_http_message not supported yet.
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addConfigModifier(
       [](envoy::extensions::filters::network::http_connection_manager::v3::HttpConnectionManager&
              hcm) -> void {
@@ -1519,9 +1501,7 @@ name: local-reply-during-encode
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, LargeRequestUrlRejected) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+  EXCLUDE_DOWNSTREAM_HTTP3
   // Send one 95 kB URL with limit 60 kB headers.
   testLargeRequestUrl(95, 60);
 }
@@ -1532,9 +1512,7 @@ TEST_P(DownstreamProtocolIntegrationTest, LargeRequestUrlAccepted) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, LargeRequestHeadersRejected) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+  EXCLUDE_DOWNSTREAM_HTTP3
   // Send one 95 kB header with limit 60 kB and 100 headers.
   testLargeRequestHeaders(95, 1, 60, 100);
 }
@@ -1545,10 +1523,8 @@ TEST_P(DownstreamProtocolIntegrationTest, LargeRequestHeadersAccepted) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, ManyRequestHeadersRejected) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    // QUICHE doesn't limit number of headers.
-    return;
-  }
+  // QUICHE doesn't limit number of headers.
+  EXCLUDE_DOWNSTREAM_HTTP3
   // Send 101 empty headers with limit 60 kB and 100 headers.
   testLargeRequestHeaders(0, 101, 60, 80);
 }
@@ -1559,10 +1535,8 @@ TEST_P(DownstreamProtocolIntegrationTest, ManyRequestHeadersAccepted) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, ManyRequestTrailersRejected) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    // QUICHE doesn't limit number of headers.
-    return;
-  }
+  // QUICHE doesn't limit number of headers.
+  EXCLUDE_DOWNSTREAM_HTTP3
   // Default header (and trailer) count limit is 100.
   config_helper_.addConfigModifier(setEnableDownstreamTrailersHttp1());
   config_helper_.addConfigModifier(setEnableUpstreamTrailersHttp1());
@@ -1622,25 +1596,18 @@ TEST_P(DownstreamProtocolIntegrationTest, ManyRequestTrailersAccepted) {
 // This test uses an Http::HeaderMapImpl instead of an Http::TestHeaderMapImpl to avoid
 // time-consuming byte size validations that will cause this test to timeout.
 TEST_P(DownstreamProtocolIntegrationTest, ManyRequestHeadersTimeout) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+  EXCLUDE_DOWNSTREAM_HTTP3
   // Set timeout for 5 seconds, and ensure that a request with 10k+ headers can be sent.
   testManyRequestHeaders(std::chrono::milliseconds(5000));
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, LargeRequestTrailersAccepted) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
   config_helper_.addConfigModifier(setEnableDownstreamTrailersHttp1());
   testLargeRequestTrailers(60, 96);
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, LargeRequestTrailersRejected) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    return;
-  }
+  EXCLUDE_DOWNSTREAM_HTTP3
   config_helper_.addConfigModifier(setEnableDownstreamTrailersHttp1());
   testLargeRequestTrailers(66, 60);
 }
@@ -1648,11 +1615,9 @@ TEST_P(DownstreamProtocolIntegrationTest, LargeRequestTrailersRejected) {
 // This test uses an Http::HeaderMapImpl instead of an Http::TestHeaderMapImpl to avoid
 // time-consuming byte size verification that will cause this test to timeout.
 TEST_P(DownstreamProtocolIntegrationTest, ManyTrailerHeaders) {
-  if (downstream_protocol_ == Http::CodecClient::Type::HTTP3) {
-    // Enable after setting QUICHE max_inbound_header_list_size_ from HCM
-    // config.
-    return;
-  }
+  // Enable after setting QUICHE max_inbound_header_list_size_ from HCM
+  // config.
+  EXCLUDE_DOWNSTREAM_HTTP3
   max_request_headers_kb_ = 96;
   max_request_headers_count_ = 20005;
 
@@ -2230,10 +2195,9 @@ TEST_P(DownstreamProtocolIntegrationTest, ConnectStreamRejection) {
       {":method", "CONNECT"}, {":path", "/"}, {":authority", "host"}});
 
   response->waitForReset();
-  if (downstreamProtocol() != Http::CodecClient::Type::HTTP3) {
-    // TODO(danzh) plumb through stream_error_on_invalid_http_message.
-    EXPECT_FALSE(codec_client_->disconnected());
-  }
+  // TODO(danzh) plumb through stream_error_on_invalid_http_message.
+  EXCLUDE_DOWNSTREAM_HTTP3;
+  EXPECT_FALSE(codec_client_->disconnected());
 }
 
 // Regression test for https://github.com/envoyproxy/envoy/issues/12131
@@ -2252,10 +2216,6 @@ TEST_P(DownstreamProtocolIntegrationTest, Test100AndDisconnect) {
 }
 
 TEST_P(DownstreamProtocolIntegrationTest, Test100AndDisconnectLegacy) {
-  if (downstreamProtocol() == Http::CodecClient::Type::HTTP1) {
-    return;
-  }
-
   config_helper_.addRuntimeOverride("envoy.reloadable_features.allow_500_after_100", "false");
 
   initialize();

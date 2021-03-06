@@ -29,20 +29,17 @@ struct HttpProtocolTestParams {
 class HttpProtocolIntegrationTest : public testing::TestWithParam<HttpProtocolTestParams>,
                                     public HttpIntegrationTest {
 public:
-  // By default returns 12 combinations of
+  // By default returns 8 combinations of
   // [HTTP  upstream / HTTP  downstream] x [Ipv4, IPv6]
   // [HTTP2 upstream / HTTP  downstream] x [Ipv4, IPv6]
   // [HTTP  upstream / HTTP2 downstream] x [IPv4, Ipv6]
   // [HTTP2 upstream / HTTP2 downstream] x [IPv4, Ipv6]
-  // [HTTP  upstream / HTTP3 downstream] x [Ipv4, IPv6]
-  // [HTTP2 upstream / HTTP3 downstream] x [IPv4, Ipv6]
   //
   // Upstream and downstream protocols may be changed via the input vectors.
   // Address combinations are propagated from TestEnvironment::getIpVersionsForTest()
   static std::vector<HttpProtocolTestParams>
   getProtocolTestParams(const std::vector<Http::CodecClient::Type>& downstream_protocols =
-                            {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2,
-                             Http::CodecClient::Type::HTTP3},
+                            {Http::CodecClient::Type::HTTP1, Http::CodecClient::Type::HTTP2},
                         const std::vector<FakeHttpConnection::Type>& upstream_protocols = {
                             FakeHttpConnection::Type::HTTP1, FakeHttpConnection::Type::HTTP2});
 

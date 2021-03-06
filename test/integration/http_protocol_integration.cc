@@ -30,22 +30,23 @@ absl::string_view upstreamToString(FakeHttpConnection::Type type) {
   return "UnknownUpstream";
 }
 
+absl::string_view downstreamToString(Http::CodecClient::Type type) {
+  switch (type) {
+  case Http::CodecClient::Type::HTTP1:
+    return "HttpDownstream_";
+  case Http::CodecClient::Type::HTTP2:
+    return "Http2Downstream_";
+  case Http::CodecClient::Type::HTTP3:
+    return "Http3Downstream_";
+  }
+  return "UnknownDownstream";
+}
+
 std::string HttpProtocolIntegrationTest::protocolTestParamsToString(
     const ::testing::TestParamInfo<HttpProtocolTestParams>& params) {
-  std::string downstream_protocol;
-  switch (params.param.downstream_protocol) {
-  case Http::CodecClient::Type::HTTP1:
-    downstream_protocol = "HttpDownstream_";
-    break;
-  case Http::CodecClient::Type::HTTP2:
-    downstream_protocol = "Http2Downstream_";
-    break;
-  case Http::CodecClient::Type::HTTP3:
-    downstream_protocol = "Http3Downstream_";
-    break;
-  }
   return absl::StrCat((params.param.version == Network::Address::IpVersion::v4 ? "IPv4_" : "IPv6_"),
-                      downstream_protocol, upstreamToString(params.param.upstream_protocol));
+                      downstreamToString(params.param.downstream_protocol),
+                      upstreamToString(params.param.upstream_protocol));
 }
 
 } // namespace Envoy

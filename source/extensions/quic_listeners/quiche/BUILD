@@ -41,7 +41,6 @@ envoy_cc_library(
     name = "envoy_quic_connection_helper_lib",
     hdrs = ["envoy_quic_connection_helper.h"],
     tags = ["nofips"],
-    visibility = ["//test:__subpackages__"],
     deps = [
         "//source/extensions/quic_listeners/quiche/platform:envoy_quic_clock_lib",
         "@com_googlesource_quiche//:quic_core_buffer_allocator_lib",
@@ -104,7 +103,6 @@ envoy_cc_library(
     hdrs = ["envoy_quic_proof_verifier.h"],
     external_deps = ["quiche_quic_platform"],
     tags = ["nofips"],
-    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_proof_verifier_base_lib",
         ":envoy_quic_utils_lib",
@@ -164,7 +162,6 @@ envoy_cc_library(
     srcs = ["codec_impl.cc"],
     hdrs = ["codec_impl.h"],
     tags = ["nofips"],
-    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_client_session_lib",
         ":envoy_quic_server_session_lib",
@@ -232,7 +229,6 @@ envoy_cc_library(
         "envoy_quic_client_stream.h",
     ],
     tags = ["nofips"],
-    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_client_connection_lib",
         ":envoy_quic_stream_lib",
@@ -288,7 +284,6 @@ envoy_cc_library(
     srcs = ["envoy_quic_client_connection.cc"],
     hdrs = ["envoy_quic_client_connection.h"],
     tags = ["nofips"],
-    visibility = ["//test:__subpackages__"],
     deps = [
         ":envoy_quic_connection_lib",
         ":envoy_quic_packet_writer_lib",
@@ -350,7 +345,8 @@ envoy_cc_library(
     # TODO(#9953) this should be cleaned up
     visibility = [
         "//source/extensions:__subpackages__",
-        "//test:__subpackages__",
+        "//test/extensions:__subpackages__",
+        "//test/server:__subpackages__",
     ],
     deps = [
         ":active_quic_listener_lib",
