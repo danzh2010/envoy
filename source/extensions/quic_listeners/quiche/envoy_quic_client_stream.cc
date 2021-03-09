@@ -292,9 +292,8 @@ void EnvoyQuicClientStream::OnTrailingHeadersComplete(bool fin, size_t frame_len
 void EnvoyQuicClientStream::maybeDecodeTrailers() {
   if (sequencer()->IsClosed() && !FinishedReadingTrailers()) {
     ASSERT(!received_trailers().empty());
-    end_stream_decoded_ = true;
-    ENVOY_STREAM_LOG(debug, "decodeTrailers: {}.", *this, received_trailers().DebugString());
     // Only decode trailers after finishing decoding body.
+    ENVOY_STREAM_LOG(debug, "decodeTrailers: {}.", *this, received_trailers().DebugString());
     end_stream_decoded_ = true;
     response_decoder_->decodeTrailers(
         spdyHeaderBlockToEnvoyHeaders<Http::ResponseTrailerMapImpl>(received_trailers()));
@@ -318,8 +317,7 @@ void EnvoyQuicClientStream::OnConnectionClosed(quic::QuicErrorCode error,
                                                quic::ConnectionCloseSource source) {
   quic::QuicSpdyClientStream::OnConnectionClosed(error, source);
   if (!end_stream_decoded_) {
-    runResetCallbacks(Http::StreamResetReason::ConnectionTermination);
-    // runResetCallbacks(quicErrorCodeToEnvoyResetReason(error));
+    runResetCallbacks(quicErrorCodeToEnvoyResetReason(error));
   }
 }
 

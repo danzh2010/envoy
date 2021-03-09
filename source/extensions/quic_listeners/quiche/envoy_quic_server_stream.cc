@@ -369,7 +369,7 @@ void EnvoyQuicServerStream::Reset(quic::QuicRstStreamErrorCode error) {
 void EnvoyQuicServerStream::OnConnectionClosed(quic::QuicErrorCode error,
                                                quic::ConnectionCloseSource source) {
   quic::QuicSpdyServerStreamBase::OnConnectionClosed(error, source);
-  runResetCallbacks(Http::StreamResetReason::ConnectionTermination);
+  runResetCallbacks(quicErrorCodeToEnvoyResetReason(error));
 }
 
 void EnvoyQuicServerStream::OnClose() {

@@ -163,7 +163,7 @@ void QuicFilterManagerConnectionImpl::closeConnectionImmediately() {
   if (quic_connection_ == nullptr) {
     return;
   }
-  quic_connection_->CloseConnection(quic::QUIC_CONNECTION_CANCELLED, "Closed by application",
+  quic_connection_->CloseConnection(quic::QUIC_NO_ERROR, "Closed by application",
                                     quic::ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   quic_connection_ = nullptr;
 }

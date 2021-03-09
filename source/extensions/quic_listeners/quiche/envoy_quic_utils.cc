@@ -99,16 +99,16 @@ Http::StreamResetReason quicRstErrorToEnvoyRemoteResetReason(quic::QuicRstStream
 }
 
 Http::StreamResetReason quicErrorCodeToEnvoyResetReason(quic::QuicErrorCode error) {
-  if (error == quic::QUIC_CONNECTION_CANCELLED) {
-    return Http::StreamResetReason::ConnectionTermination;
-  } else {
+  if (error == quic::QUIC_HANDSHAKE_FAILED || error == quic::QUIC_HANDSHAKE_TIMEOUT) {
     return Http::StreamResetReason::ConnectionFailure;
+  } else {
+    return Http::StreamResetReason::ConnectionTermination;
   }
 }
 
 Http::GoAwayErrorCode quicErrorCodeToEnvoyErrorCode(quic::QuicErrorCode error) noexcept {
   switch (error) {
-  case quic::QUIC_PEER_GOING_AWAY:
+  case quic::QUIC_NO_ERROR:
     return Http::GoAwayErrorCode::NoError;
   default:
     return Http::GoAwayErrorCode::Other;

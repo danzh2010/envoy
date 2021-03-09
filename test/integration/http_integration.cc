@@ -321,9 +321,11 @@ void HttpIntegrationTest::initialize() {
   if (downstream_protocol_ != Http::CodecClient::Type::HTTP3) {
     return BaseIntegrationTest::initialize();
   }
+  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
+  ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(*api_));
 
   quic_transport_socket_factory_ =
-      IntegrationUtil::createQuicClientTransportSocketFactory(*api_, san_to_match_);
+      IntegrationUtil::createQuicClientTransportSocketFactory(mock_factory_ctx, san_to_match_);
   config_helper_.addConfigModifier([this](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
     envoy::extensions::transport_sockets::quic::v3::QuicDownstreamTransport
         quic_transport_socket_config;

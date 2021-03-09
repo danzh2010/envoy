@@ -248,6 +248,7 @@ TEST_P(ProtocolIntegrationTest, ContinueHeadersOnlyInjectBodyFilter) {
   // because FIN bit in IETF QUIC stream is decoupled with http HEADERS frame.
   // decodeHeaders() is always called with end_stream = false if QUICHE is
   // using IETF version.
+  EXCLUDE_DOWNSTREAM_HTTP3
   EXCLUDE_UPSTREAM_HTTP3;
   config_helper_.addFilter(R"EOF(
   name: continue-headers-only-inject-body-filter

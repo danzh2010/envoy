@@ -109,9 +109,9 @@ struct ConnectionCallbacks : public Network::ConnectionCallbacks {
   bool connected_{false};
 };
 
-Network::TransportSocketFactoryPtr
-IntegrationUtil::createQuicClientTransportSocketFactory(Api::Api& api,
-                                                        const std::string& san_to_match) {
+Network::TransportSocketFactoryPtr IntegrationUtil::createQuicClientTransportSocketFactory(
+    Server::Configuration::TransportSocketFactoryContext& context,
+    const std::string& san_to_match) {
   std::string yaml_plain = R"EOF(
   common_tls_context:
     validation_context:
@@ -138,10 +138,7 @@ IntegrationUtil::createQuicClientTransportSocketFactory(Api::Api& api,
   message.mutable_typed_config()->PackFrom(quic_transport_socket_config);
   auto& config_factory = Config::Utility::getAndCheckFactory<
       Server::Configuration::UpstreamTransportSocketConfigFactory>(message);
-  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
-  ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(api));
-  return config_factory.createTransportSocketFactory(quic_transport_socket_config,
-                                                     mock_factory_ctx);
+  return config_factory.createTransportSocketFactory(quic_transport_socket_config, context);
 }
 
 BufferingStreamDecoderPtr
@@ -163,8 +160,10 @@ IntegrationUtil::makeSingleRequest(const Network::Address::InstanceConstSharedPt
       fmt::format("{}://127.0.0.1:80", (type == Http::CodecClient::Type::HTTP3 ? "udp" : "tcp")),
       time_system)};
 
+  NiceMock<Server::Configuration::MockTransportSocketFactoryContext> mock_factory_ctx;
+  ON_CALL(mock_factory_ctx, api()).WillByDefault(testing::ReturnRef(api));
   Network::TransportSocketFactoryPtr transport_socket_factory =
-      createQuicClientTransportSocketFactory(api, "spiffe://lyft.com/backend-team");
+      createQuicClientTransportSocketFactory(mock_factory_ctx, "spiffe://lyft.com/backend-team");
   Network::ClientConnectionPtr connection =
       (type == Http::CodecClient::Type::HTTP3
            ? Config::Utility::getAndCheckFactoryByName<Http::QuicClientConnectionFactory>(

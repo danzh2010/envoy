@@ -59,6 +59,7 @@ public:
     auto conn_impl = dynamic_cast<const Network::ConnectionImpl*>(decoder_callbacks_->connection());
     if (conn_impl != nullptr) {
       const_cast<Network::ConnectionImpl*>(conn_impl)->onWriteBufferHighWatermark();
+      return;
     }
     // If transport protocol is QUIC, simulate connection buffer above watermark differently.
     auto quic_connection = const_cast<Quic::QuicFilterManagerConnectionImpl*>(
@@ -75,6 +76,7 @@ public:
     auto conn_impl = dynamic_cast<const Network::ConnectionImpl*>(decoder_callbacks_->connection());
     if (conn_impl != nullptr) {
       const_cast<Network::ConnectionImpl*>(conn_impl)->onWriteBufferHighWatermark();
+      return;
     }
     // If transport protocol is QUIC, simulate connection buffer below watermark differently.
     auto quic_connection = const_cast<Quic::QuicFilterManagerConnectionImpl*>(
