@@ -55,7 +55,7 @@
 #include "server/guarddog_impl.h"
 #include "server/listener_hooks.h"
 #include "server/ssl_context_manager.h"
-
+#include "server/backtrace.h"
 namespace Envoy {
 namespace Server {
 
@@ -645,6 +645,8 @@ void InstanceImpl::startWorkers() {
       return;
     }
 
+  //  std::cerr << "=============== initialization timer\n";
+    BACKTRACE_LOG();
     initialization_timer_->complete();
     // Update server stats as soon as initialization is done.
     updateServerStats();
