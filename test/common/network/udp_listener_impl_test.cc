@@ -231,12 +231,10 @@ TEST_P(UdpListenerImplTest, UdpEcho) {
   setup();
 
   // We send 17 packets and expect it to echo.
-  absl::FixedArray<std::string> client_data({"first", "second", "third", "forth", "fifth", "sixth",
-                                             "seventh", "eighth", "ninth", "tenth", "eleventh",
-                                             "twelveth", "thirteenth", "fourteenth", "fifteenth",
-                                             "sixteenth", "seventeenth"});
-  for (const auto& i : client_data) {
-    client_.write(i, *send_to_addr_);
+  absl::FixedArray<std::string> client_data(300);
+  for (size_t i = 0; i < 300; ++i) {
+    client_data[i] = "aaaa";
+    client_.write("aaaa", *send_to_addr_);
   }
 
   // For unit test purposes, we assume that the data was received in order.
@@ -270,6 +268,7 @@ TEST_P(UdpListenerImplTest, UdpEcho) {
       }));
 
   EXPECT_CALL(listener_callbacks_, onWriteReady(_)).WillOnce(Invoke([&](const Socket& socket) {
+    EXPECT_EQ(server_received_data.size(), 300);
     EXPECT_EQ(&socket.ioHandle(), &server_socket_->ioHandle());
     ASSERT_NE(test_peer_address, nullptr);
 
