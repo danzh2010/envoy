@@ -95,6 +95,9 @@ public:
                                   const Network::FilterChain& filter_chain,
                                   ConnectionMapIter position);
 
+  std::vector<absl::string_view>::const_iterator
+  SelectAlpn(const std::vector<absl::string_view>& alpns) const override;
+
   using quic::QuicSession::PerformActionOnActiveStreams;
 
 protected:
