@@ -131,9 +131,9 @@ pytz==2021.1 \
     # via
     #   -r tools/docs/requirements.txt
     #   babel
-requests==2.25.1 \
-    --hash=sha256:27973dd4a904a4f13b263a19c866c13b92a39ed1c964655f025f3f8d3d75b804 \
-    --hash=sha256:c210084e36a42ae6b9219e00e48287def368a26d03a048ddad7bfee44f75871e
+requests==2.27.0 \
+    --hash=sha256:f71a09d7feba4a6b64ffd8e9d9bc60f9bf7d7e19fd0e04362acb1cfc2e3d98df \
+    --hash=sha256:8e5643905bf20a308e25e4c1dd379117c09000bf8a82ebccc462cfb1b34a16b5
     # via
     #   -r tools/docs/requirements.txt
     #   sphinx
