@@ -728,7 +728,11 @@ ConnectionManagerImpl::ActiveStream::ActiveStream(ConnectionManagerImpl& connect
 
 void ConnectionManagerImpl::ActiveStream::completeRequest() {
   filter_manager_.streamInfo().onRequestComplete();
-
+  ENVOY_STREAM_LOG(
+      error, "============ completeRequest duration {} us, connection cwnd {} bytes, rtt {} ms",
+      *this, filter_manager_.streamInfo().requestComplete().value().count() / 1000,
+      connection()->congestionWindowInBytes().value(),
+      connection()->lastRoundTripTime().value().count());
   if (connection_manager_.remote_close_) {
     filter_manager_.streamInfo().setResponseCodeDetails(
         StreamInfo::ResponseCodeDetails::get().DownstreamRemoteDisconnect);

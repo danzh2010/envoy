@@ -702,7 +702,10 @@ void ConnectionImpl::onWriteReady() {
   ASSERT(!result.end_stream_read_); // The interface guarantees that only read operations set this.
   uint64_t new_buffer_size = write_buffer_->length();
   updateWriteBufferStats(result.bytes_processed_, new_buffer_size);
-
+  if (new_buffer_size == 0) {
+    ENVOY_CONN_LOG(error, "============ write buffer empty, cwnd {} bytes ", *this,
+                   congestionWindowInBytes().value());
+  }
   // NOTE: If the delayed_close_timer_ is set, it must only trigger after a delayed_close_timeout_
   // period of inactivity from the last write event. Therefore, the timer must be reset to its
   // original timeout value unless the socket is going to be closed as a result of the doWrite().

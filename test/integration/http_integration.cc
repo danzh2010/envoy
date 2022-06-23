@@ -5,6 +5,7 @@
 #include <memory>
 #include <regex>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "envoy/buffer/buffer.h"
@@ -603,8 +604,26 @@ void HttpIntegrationTest::testGiantRequestAndResponse(uint64_t request_size, uin
   ENVOY_LOG_MISC(warn, "manually lowering logs to error");
   LogLevelSetter save_levels(spdlog::level::err);
 #endif
+  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
+    bootstrap.mutable_static_resources()
+        ->mutable_listeners(0)
+        ->mutable_per_connection_buffer_limit_bytes()
+        ->set_value(10 * 1024 * 1024);
+    auto* socket_option =
+        bootstrap.mutable_static_resources()->mutable_listeners(0)->add_socket_options();
+    socket_option->set_description("SO_RCVBUF");
+    socket_option->set_level(SOL_SOCKET);
+    socket_option->set_int_value(2 * 1024 * 1024);
+    socket_option->set_name(SO_RCVBUF);
+  });
   initialize();
-  codec_client_ = makeHttpConnection(makeClientConnection(lookupPort("http")));
+
+  auto options = std::make_shared<Network::Socket::Options>();
+  options->emplace_back(std::make_shared<Network::SocketOptionImpl>(
+      envoy::config::core::v3::SocketOption::STATE_PREBIND,
+      ENVOY_MAKE_SOCKET_OPTION_NAME(SOL_SOCKET, SO_RCVBUF), 2 * 1024 * 1024));
+
+  codec_client_ = makeHttpConnection(makeClientConnectionWithOptions(lookupPort("http"), options));
   Http::TestRequestHeaderMapImpl request_headers{
       {":method", "GET"},
       {":path", "/test/long/url"},

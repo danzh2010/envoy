@@ -62,6 +62,20 @@ TEST_P(MultiplexedIntegrationTest, RouterRequestAndResponseWithGiantBodyNoBuffer
   testGiantRequestAndResponse(GiantPayoadSizeByte, GiantPayoadSizeByte, false);
 }
 
+TEST_P(MultiplexedIntegrationTest, RouterGiantResponseBodyNoBuffer) {
+  ENVOY_LOG_MISC(warn, "manually lowering logs to error");
+  LogLevelSetter save_levels(spdlog::level::err);
+  config_helper_.addConfigModifier(ConfigHelper::adjustUpstreamTimeoutForTsan);
+  testGiantRequestAndResponse(0, GiantPayoadSizeByte, false);
+}
+
+TEST_P(MultiplexedIntegrationTest, RouterGiantRequestBodyNoBuffer) {
+  ENVOY_LOG_MISC(warn, "manually lowering logs to error");
+  LogLevelSetter save_levels(spdlog::level::err);
+  config_helper_.addConfigModifier(ConfigHelper::adjustUpstreamTimeoutForTsan);
+  testGiantRequestAndResponse(GiantPayoadSizeByte, 0, false);
+}
+
 TEST_P(MultiplexedIntegrationTest, FlowControlOnAndGiantBody) {
   config_helper_.addConfigModifier(ConfigHelper::adjustUpstreamTimeoutForTsan);
   config_helper_.setBufferLimits(1024, 1024); // Set buffer limits upstream and downstream

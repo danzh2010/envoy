@@ -85,6 +85,8 @@ private:
   Http::RequestDecoder* request_decoder_{nullptr};
   envoy::config::core::v3::HttpProtocolOptions::HeadersWithUnderscoresAction
       headers_with_underscores_action_;
+
+  MonotonicTime local_end_stream_time_;
 };
 
 } // namespace Quic

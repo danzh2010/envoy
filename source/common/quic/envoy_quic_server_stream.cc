@@ -3,6 +3,7 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
+#include <chrono>
 #include <memory>
 
 #include "source/common/buffer/buffer_impl.h"
@@ -103,6 +104,10 @@ void EnvoyQuicServerStream::encodeData(Buffer::Instance& data, bool end_stream) 
     return;
   }
   if (local_end_stream_) {
+    local_end_stream_time_ = filterManagerConnection()->dispatcher().approximateMonotonicTime();
+    if (write_side_closed()) {
+      ENVOY_STREAM_LOG(error, "============== write end_stream immediately", *this);
+    }
     onLocalEndStream();
   }
 }
@@ -394,6 +399,18 @@ void EnvoyQuicServerStream::clearWatermarkBuffer() {
 void EnvoyQuicServerStream::OnCanWrite() {
   SendBufferMonitor::ScopedWatermarkBufferUpdater updater(this, this);
   quic::QuicSpdyServerStreamBase::OnCanWrite();
+  if (write_side_closed()) {
+    auto time_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        filterManagerConnection()->dispatcher().approximateMonotonicTime() -
+        local_end_stream_time_);
+    ENVOY_STREAM_LOG(error, "============== write end_stream took {} us", *this, time_us.count());
+    std::cerr << "connection cwnd bytes "
+              << filterManagerConnection()->congestionWindowInBytes().value() << "\n";
+  } else if (IsFlowControlBlocked()) {
+    ENVOY_STREAM_LOG(error, "============== stream flow control blocked", *this);
+  } else if (session()->IsConnectionFlowControlBlocked()) {
+    ENVOY_STREAM_LOG(error, "============== connection flow control blocked", *this);
+  }
 }
 
 uint32_t EnvoyQuicServerStream::streamId() { return id(); }
