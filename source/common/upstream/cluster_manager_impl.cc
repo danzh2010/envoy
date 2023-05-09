@@ -1660,6 +1660,7 @@ ClusterManagerImpl::ThreadLocalClusterManagerImpl::ClusterEntry::httpConnPoolImp
     return nullptr;
   }
 
+  ENVOY_LOG(error, "============ httpConnPoolImpl pick host {}", host->address()->asString());
   // Right now, HTTP, HTTP/2 and ALPN pools are considered separate.
   // We could do better here, and always use the ALPN pool and simply make sure
   // we end up on a connection of the correct protocol, but for simplicity we're

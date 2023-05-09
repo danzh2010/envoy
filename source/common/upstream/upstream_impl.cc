@@ -439,6 +439,8 @@ HostDescriptionImpl::HostDescriptionImpl(
       priority_(priority),
       socket_factory_(resolveTransportSocketFactory(dest_address, metadata_.get())),
       creation_time_(time_source.monotonicTime()) {
+  ENVOY_LOG(error, "=========== HostDescriptionImpl with dst_address {} ",
+            dest_address->asString());
   if (health_check_config.port_value() != 0 && dest_address->type() != Network::Address::Type::Ip) {
     // Setting the health check port to non-0 only works for IP-type addresses. Setting the port
     // for a pipe address is a misconfiguration. Throw an exception.
@@ -446,6 +448,7 @@ HostDescriptionImpl::HostDescriptionImpl(
         fmt::format("Invalid host configuration: non-zero port for non-IP address"));
   }
   health_check_address_ = resolveHealthCheckAddress(health_check_config, dest_address);
+  address_with_adjusted_port_ = adjustPortForAddress(address_);
 }
 
 Network::UpstreamTransportSocketFactory& HostDescriptionImpl::resolveTransportSocketFactory(
@@ -459,11 +462,19 @@ Network::UpstreamTransportSocketFactory& HostDescriptionImpl::resolveTransportSo
   return match.factory_;
 }
 
+Network::Address::InstanceConstSharedPtr
+HostDescriptionImpl::adjustPortForAddress(const Network::Address::InstanceConstSharedPtr& address) {
+  const uint16_t port = transportSocketFactory().implementsSecureTransport() ? 443 : 80;
+  return address->ip()->port() == port ? address
+                                       : Network::Utility::getAddressWithPort(*address, port);
+}
+
 Host::CreateConnectionData HostImpl::createConnection(
     Event::Dispatcher& dispatcher, const Network::ConnectionSocket::OptionsSharedPtr& options,
     Network::TransportSocketOptionsConstSharedPtr transport_socket_options) const {
-  return createConnection(dispatcher, cluster(), address(), addressList(), transportSocketFactory(),
-                          options, transport_socket_options, shared_from_this());
+  return createConnection(dispatcher, cluster(), address_with_adjusted_port(),
+                          address_list_with_adjusted_port(), transportSocketFactory(), options,
+                          transport_socket_options, shared_from_this());
 }
 
 void HostImpl::setEdsHealthFlag(envoy::config::core::v3::HealthStatus health_status) {
@@ -520,6 +531,8 @@ Host::CreateConnectionData HostImpl::createConnection(
         socket_factory.createTransportSocket(transport_socket_options, host),
         upstream_local_address.socket_options_, transport_socket_options);
   } else if (address_list.size() > 1) {
+    ENVOY_LOG(error, "=============== HappyEyeballsConnectionImpl with addresses {}",
+              address_list[0]->asString());
     connection = std::make_unique<Network::HappyEyeballsConnectionImpl>(
         dispatcher, address_list, source_address_selector, socket_factory, transport_socket_options,
         host, options);

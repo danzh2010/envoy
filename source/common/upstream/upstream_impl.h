@@ -285,10 +285,17 @@ public:
 
   void setAddressList(const std::vector<Network::Address::InstanceConstSharedPtr>& address_list) {
     address_list_ = address_list;
+    address_list_with_adjusted_port_.clear();
+    for (const auto& address : address_list_) {
+      address_list_with_adjusted_port_.push_back(adjustPortForAddress(address));
+    }
   }
 
 protected:
-  void setAddress(Network::Address::InstanceConstSharedPtr address) { address_ = address; }
+  void setAddress(Network::Address::InstanceConstSharedPtr address) {
+    address_ = address;
+    address_with_adjusted_port_ = adjustPortForAddress(address_);
+  }
 
   void setHealthCheckAddress(Network::Address::InstanceConstSharedPtr address) {
     health_check_address_ = address;
@@ -306,12 +313,26 @@ protected:
     last_hc_pass_time_.emplace(std::move(last_hc_pass_time));
   }
 
+  Network::Address::InstanceConstSharedPtr address_with_adjusted_port() const {
+    return address_with_adjusted_port_;
+  }
+
+  const std::vector<Network::Address::InstanceConstSharedPtr>&
+  address_list_with_adjusted_port() const {
+    return address_list_with_adjusted_port_;
+  }
+
 private:
+  Network::Address::InstanceConstSharedPtr
+  adjustPortForAddress(const Network::Address::InstanceConstSharedPtr& address);
+
   ClusterInfoConstSharedPtr cluster_;
   const std::string hostname_;
   const std::string health_checks_hostname_;
   Network::Address::InstanceConstSharedPtr address_;
+  Network::Address::InstanceConstSharedPtr address_with_adjusted_port_;
   std::vector<Network::Address::InstanceConstSharedPtr> address_list_;
+  std::vector<Network::Address::InstanceConstSharedPtr> address_list_with_adjusted_port_;
   Network::Address::InstanceConstSharedPtr health_check_address_;
   std::atomic<bool> canary_;
   mutable absl::Mutex metadata_mutex_;

@@ -5,6 +5,7 @@
 #include "envoy/extensions/filters/http/dynamic_forward_proxy/v3/dynamic_forward_proxy.pb.h"
 
 #include "source/common/http/utility.h"
+#include "source/common/network/address_impl.h"
 #include "source/common/network/filter_state_proxy_info.h"
 #include "source/common/runtime/runtime_features.h"
 #include "source/common/stream_info/upstream_address.h"
@@ -156,7 +157,8 @@ Http::FilterHeadersStatus ProxyFilter::decodeHeaders(Http::RequestHeaderMap& hea
   switch (result.status_) {
   case LoadDnsCacheEntryStatus::InCache: {
     ASSERT(cache_load_handle_ == nullptr);
-    ENVOY_STREAM_LOG(debug, "DNS cache entry already loaded, continuing", *decoder_callbacks_);
+    ENVOY_STREAM_LOG(debug, "DNS cache entry already loaded with default_port {}, continuing",
+                     *decoder_callbacks_, default_port);
 
     auto const& host = config_->cache().getHost(headers.Host()->value().getStringView());
     latchTime(decoder_callbacks_, DNS_END);
@@ -164,7 +166,33 @@ Http::FilterHeadersStatus ProxyFilter::decodeHeaders(Http::RequestHeaderMap& hea
       onDnsResolutionFail();
       return Http::FilterHeadersStatus::StopIteration;
     }
-    addHostAddressToFilterState(host.value()->address());
+    Network::Address::InstanceConstSharedPtr host_address = host.value()->address();
+    if (host_address->ip() != nullptr && default_port != host_address->ip()->port()) {
+      // Update the host address with the derived port.
+      sockaddr_storage ss;
+
+      if (host_address->ip()->version() == Network::Address::IpVersion::v4) {
+        // Create and return quic ipv4 address
+        auto ipv4_addr = reinterpret_cast<sockaddr_in*>(&ss);
+        memset(ipv4_addr, 0, sizeof(sockaddr_in));
+        ipv4_addr->sin_family = AF_INET;
+        ipv4_addr->sin_port = htons(default_port);
+        ipv4_addr->sin_addr.s_addr = host_address->ip()->ipv4()->address();
+      } else {
+        // Create and return quic ipv6 address
+        auto ipv6_addr = reinterpret_cast<sockaddr_in6*>(&ss);
+        memset(ipv6_addr, 0, sizeof(sockaddr_in6));
+        ipv6_addr->sin6_family = AF_INET6;
+        ipv6_addr->sin6_port = htons(default_port);
+        ASSERT(sizeof(ipv6_addr->sin6_addr.s6_addr) == 16u);
+        *reinterpret_cast<absl::uint128*>(ipv6_addr->sin6_addr.s6_addr) =
+            host_address->ip()->ipv6()->address();
+      }
+      host_address = Network::Address::addressFromSockAddrOrDie(ss, 0, true);
+    }
+    ENVOY_STREAM_LOG(error, "========== addHostAddressToFilterState with host address {}",
+                     *decoder_callbacks_, host_address->asString());
+    addHostAddressToFilterState(host_address);
 
     return Http::FilterHeadersStatus::Continue;
   }

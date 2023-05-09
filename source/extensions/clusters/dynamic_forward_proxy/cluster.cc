@@ -83,15 +83,24 @@ void Cluster::addOrUpdateHost(
       return;
     }
 
-    ENVOY_LOG(debug, "adding new dfproxy cluster host '{}'", host);
+    ENVOY_LOG(debug, "adding new dfproxy cluster host '{}' with address {}", host,
+              host_info->address()->asString());
+    const uint16_t port =
+        info()->transportSocketMatcher().resolve(nullptr).factory_.implementsSecureTransport() ? 443
+                                                                                               : 80;
 
-    emplaced_host = host_map_
-                        .try_emplace(host, host_info,
-                                     std::make_shared<Upstream::LogicalHost>(
-                                         info(), std::string{host}, host_info->address(),
-                                         host_info->addressList(), dummy_locality_lb_endpoint_,
-                                         dummy_lb_endpoint_, nullptr, time_source_))
-                        .first->second.logical_host_;
+    emplaced_host =
+        host_map_
+            .try_emplace(
+                host, host_info,
+                std::make_shared<Upstream::LogicalHost>(
+                    info(), std::string{host},
+                    (host_info->address()->ip()->port() == port
+                         ? host_info->address()
+                         : Network::Utility::getAddressWithPort(*(host_info->address()), port)),
+                    host_info->addressList(), dummy_locality_lb_endpoint_, dummy_lb_endpoint_,
+                    nullptr, time_source_))
+            .first->second.logical_host_;
   }
 
   ASSERT(emplaced_host);
@@ -104,7 +113,8 @@ void Cluster::addOrUpdateHost(
 void Cluster::onDnsHostAddOrUpdate(
     const std::string& host,
     const Extensions::Common::DynamicForwardProxy::DnsHostInfoSharedPtr& host_info) {
-  ENVOY_LOG(debug, "Adding host info for {}", host);
+  ENVOY_LOG(debug, "Adding host info for {} with address {} to cluster {}", host,
+            host_info->address()->asString(), info()->name());
 
   std::unique_ptr<Upstream::HostVector> hosts_added;
   addOrUpdateHost(host, host_info, hosts_added);
