@@ -1324,6 +1324,9 @@ envoy_cc_test(
     tags = [
         "cpu:3",
     ],
+    data = [
+        "//test/config/integration/certs",
+    ],
     deps = [
         ":http_integration_lib",
         ":integration_test_lib",

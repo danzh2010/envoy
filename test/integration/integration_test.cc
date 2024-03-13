@@ -8,6 +8,7 @@
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 #include "envoy/registry/registry.h"
 
+#include "integration_test.h"
 #include "source/common/http/header_map_impl.h"
 #include "source/common/http/headers.h"
 #include "source/common/network/socket_option_factory.h"
@@ -58,6 +59,26 @@ void setAllowHttp10WithDefaultHost(
   hcm.mutable_http_protocol_options()->set_default_host_for_http_10("default.com");
 }
 
+absl::string_view upstreamToString(Http::CodecType type) {
+  switch (type) {
+  case Http::CodecType::HTTP1:
+    return "HttpUpstream";
+  case Http::CodecType::HTTP2:
+    return "Http2Upstream";
+  case Http::CodecType::HTTP3:
+    return "Http3Upstream";
+  }
+  return "UnknownUpstream";
+}
+
+std::string integrationTestTestParamToString(
+    const testing::TestParamInfo<std::tuple<Network::Address::IpVersion, Http1ParserImpl, Http::CodecType>>&
+        params) {
+  return absl::StrCat(TestUtility::ipVersionToString(std::get<0>(params.param)),
+                      TestUtility::http1ParserImplToString(std::get<1>(params.param)),
+                      upstreamToString(std::get<2>(params.param)));
+}
+
 std::string testParamToString(
     const testing::TestParamInfo<std::tuple<Network::Address::IpVersion, Http1ParserImpl>>&
         params) {
@@ -69,8 +90,9 @@ std::string testParamToString(
 
 INSTANTIATE_TEST_SUITE_P(IpVersionsAndHttp1Parser, IntegrationTest,
                          Combine(ValuesIn(TestEnvironment::getIpVersionsForTest()),
-                                 Values(Http1ParserImpl::HttpParser, Http1ParserImpl::BalsaParser)),
-                         testParamToString);
+                                 Values(Http1ParserImpl::HttpParser, Http1ParserImpl::BalsaParser),
+                                 Values(Http::CodecType::HTTP1)),
+                         integrationTestTestParamToString);
 
 // Verify that we gracefully handle an invalid pre-bind socket option when using reuse_port.
 TEST_P(IntegrationTest, BadPrebindSocketOptionWithReusePort) {
@@ -1680,10 +1702,18 @@ TEST_P(IntegrationTest, TestHeadWithExplicitTE) {
   tcp_client->close();
 }
 
-TEST_P(IntegrationTest, TestBind) {
+class UpstreamProtocolIntegrationTest : public IntegrationTest {};
+
+INSTANTIATE_TEST_SUITE_P(IpVersionsAndHttp1ParserAndUpstreamProtocol, UpstreamProtocolIntegrationTest,
+                         Combine(ValuesIn(TestEnvironment::getIpVersionsForTest()),
+                                 Values(Http1ParserImpl::HttpParser, Http1ParserImpl::BalsaParser),
+                                 Values(Http::CodecType::HTTP1, Http::CodecType::HTTP3)),
+                         integrationTestTestParamToString);
+
+TEST_P(UpstreamProtocolIntegrationTest, TestBind) {
   std::string address_string;
   if (version_ == Network::Address::IpVersion::v4) {
-    address_string = TestUtility::getIpv4Loopback();
+    address_string = "127.0.0.2"; // TestUtility::getIpv4Loopback();
   } else {
     address_string = "::1";
   }
@@ -1697,7 +1727,7 @@ TEST_P(IntegrationTest, TestBind) {
       codec_client_->makeRequestWithBody(Http::TestRequestHeaderMapImpl{{":method", "GET"},
                                                                         {":path", "/test/long/url"},
                                                                         {":scheme", "http"},
-                                                                        {":authority", "host"}},
+                                                                        {":authority", "sni.lyft.com"}},
                                          1024);
   ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
   ASSERT_NE(fake_upstream_connection_, nullptr);
