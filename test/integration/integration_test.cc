@@ -1710,7 +1710,7 @@ INSTANTIATE_TEST_SUITE_P(IpVersionsAndHttp1ParserAndUpstreamProtocol, UpstreamPr
                                  Values(Http::CodecType::HTTP1, Http::CodecType::HTTP3)),
                          integrationTestTestParamToString);
 
-TEST_P(UpstreamProtocolIntegrationTest, TestBind) {
+TEST_P(UpstreamProtocolIntegrationTest, TestBindConfigInClusterManager) {
   std::string address_string;
   if (version_ == Network::Address::IpVersion::v4) {
     address_string = "127.0.0.2"; // TestUtility::getIpv4Loopback();
@@ -1719,6 +1719,44 @@ TEST_P(UpstreamProtocolIntegrationTest, TestBind) {
   }
   config_helper_.setSourceAddress(address_string);
   useAccessLog("%UPSTREAM_LOCAL_ADDRESS%");
+  initialize();
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+
+  auto response =
+      codec_client_->makeRequestWithBody(Http::TestRequestHeaderMapImpl{{":method", "GET"},
+                                                                        {":path", "/test/long/url"},
+                                                                        {":scheme", "http"},
+                                                                        {":authority", "sni.lyft.com"}},
+                                         1024);
+  ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
+  ASSERT_NE(fake_upstream_connection_, nullptr);
+  std::string address = fake_upstream_connection_->connection()
+                            .connectionInfoProvider()
+                            .remoteAddress()
+                            ->ip()
+                            ->addressAsString();
+  EXPECT_EQ(address, address_string);
+  ASSERT_TRUE(fake_upstream_connection_->waitForNewStream(*dispatcher_, upstream_request_));
+  ASSERT_NE(upstream_request_, nullptr);
+  ASSERT_TRUE(upstream_request_->waitForEndStream(*dispatcher_));
+
+  cleanupUpstreamAndDownstream();
+  EXPECT_THAT(waitForAccessLog(access_log_name_), HasSubstr(address_string));
+}
+
+TEST_P(UpstreamProtocolIntegrationTest, TestBindConfigInCluster) {
+  std::string address_string = (version_ == Network::Address::IpVersion::v4 ? "127.0.0.2" : "::1");
+  useAccessLog("%UPSTREAM_LOCAL_ADDRESS%");
+     config_helper_.addConfigModifier(
+        [&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
+            auto* bind_config_address = bootstrap.mutable_static_resources()
+                                            ->mutable_clusters(0)
+                                            ->mutable_upstream_bind_config()
+                                            ->mutable_source_address();
+            bind_config_address->set_address(address_string);
+            bind_config_address->set_port_value(0);
+        });
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
