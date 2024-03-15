@@ -9,7 +9,8 @@
 namespace Envoy {
 // TODO(#28841) parameterize to run with and without UHV
 class IntegrationTest
-    : public testing::TestWithParam<std::tuple<Network::Address::IpVersion, Http1ParserImpl, Http::CodecType>>,
+    : public testing::TestWithParam<
+          std::tuple<Network::Address::IpVersion, Http1ParserImpl, Http::CodecType>>,
       public HttpIntegrationTest {
 public:
   IntegrationTest()

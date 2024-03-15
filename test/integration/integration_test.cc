@@ -1,3 +1,4 @@
+#include "integration_test.h"
 #include "test/integration/integration_test.h"
 
 #include <string>
@@ -8,7 +9,6 @@
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
 #include "envoy/registry/registry.h"
 
-#include "integration_test.h"
 #include "source/common/http/header_map_impl.h"
 #include "source/common/http/headers.h"
 #include "source/common/network/socket_option_factory.h"
@@ -72,8 +72,8 @@ absl::string_view upstreamToString(Http::CodecType type) {
 }
 
 std::string integrationTestTestParamToString(
-    const testing::TestParamInfo<std::tuple<Network::Address::IpVersion, Http1ParserImpl, Http::CodecType>>&
-        params) {
+    const testing::TestParamInfo<
+        std::tuple<Network::Address::IpVersion, Http1ParserImpl, Http::CodecType>>& params) {
   return absl::StrCat(TestUtility::ipVersionToString(std::get<0>(params.param)),
                       TestUtility::http1ParserImplToString(std::get<1>(params.param)),
                       upstreamToString(std::get<2>(params.param)));
@@ -1704,7 +1704,8 @@ TEST_P(IntegrationTest, TestHeadWithExplicitTE) {
 
 class UpstreamProtocolIntegrationTest : public IntegrationTest {};
 
-INSTANTIATE_TEST_SUITE_P(IpVersionsAndHttp1ParserAndUpstreamProtocol, UpstreamProtocolIntegrationTest,
+INSTANTIATE_TEST_SUITE_P(IpVersionsAndHttp1ParserAndUpstreamProtocol,
+                         UpstreamProtocolIntegrationTest,
                          Combine(ValuesIn(TestEnvironment::getIpVersionsForTest()),
                                  Values(Http1ParserImpl::HttpParser, Http1ParserImpl::BalsaParser),
                                  Values(Http::CodecType::HTTP1, Http::CodecType::HTTP3)),
@@ -1723,12 +1724,12 @@ TEST_P(UpstreamProtocolIntegrationTest, TestBindConfigInClusterManager) {
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
 
-  auto response =
-      codec_client_->makeRequestWithBody(Http::TestRequestHeaderMapImpl{{":method", "GET"},
-                                                                        {":path", "/test/long/url"},
-                                                                        {":scheme", "http"},
-                                                                        {":authority", "sni.lyft.com"}},
-                                         1024);
+  auto response = codec_client_->makeRequestWithBody(
+      Http::TestRequestHeaderMapImpl{{":method", "GET"},
+                                     {":path", "/test/long/url"},
+                                     {":scheme", "http"},
+                                     {":authority", "sni.lyft.com"}},
+      1024);
   ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
   ASSERT_NE(fake_upstream_connection_, nullptr);
   std::string address = fake_upstream_connection_->connection()
@@ -1748,25 +1749,24 @@ TEST_P(UpstreamProtocolIntegrationTest, TestBindConfigInClusterManager) {
 TEST_P(UpstreamProtocolIntegrationTest, TestBindConfigInCluster) {
   std::string address_string = (version_ == Network::Address::IpVersion::v4 ? "127.0.0.2" : "::1");
   useAccessLog("%UPSTREAM_LOCAL_ADDRESS%");
-     config_helper_.addConfigModifier(
-        [&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
-            auto* bind_config_address = bootstrap.mutable_static_resources()
-                                            ->mutable_clusters(0)
-                                            ->mutable_upstream_bind_config()
-                                            ->mutable_source_address();
-            bind_config_address->set_address(address_string);
-            bind_config_address->set_port_value(0);
-        });
+  config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
+    auto* bind_config_address = bootstrap.mutable_static_resources()
+                                    ->mutable_clusters(0)
+                                    ->mutable_upstream_bind_config()
+                                    ->mutable_source_address();
+    bind_config_address->set_address(address_string);
+    bind_config_address->set_port_value(0);
+  });
   initialize();
 
   codec_client_ = makeHttpConnection(lookupPort("http"));
 
-  auto response =
-      codec_client_->makeRequestWithBody(Http::TestRequestHeaderMapImpl{{":method", "GET"},
-                                                                        {":path", "/test/long/url"},
-                                                                        {":scheme", "http"},
-                                                                        {":authority", "sni.lyft.com"}},
-                                         1024);
+  auto response = codec_client_->makeRequestWithBody(
+      Http::TestRequestHeaderMapImpl{{":method", "GET"},
+                                     {":path", "/test/long/url"},
+                                     {":scheme", "http"},
+                                     {":authority", "sni.lyft.com"}},
+      1024);
   ASSERT_TRUE(fake_upstreams_[0]->waitForHttpConnection(*dispatcher_, fake_upstream_connection_));
   ASSERT_NE(fake_upstream_connection_, nullptr);
   std::string address = fake_upstream_connection_->connection()

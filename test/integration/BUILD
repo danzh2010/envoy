@@ -1321,11 +1321,11 @@ envoy_cc_test(
     name = "integration_test",
     size = "large",
     srcs = ["integration_test.cc"],
-    tags = [
-        "cpu:3",
-    ],
     data = [
         "//test/config/integration/certs",
+    ],
+    tags = [
+        "cpu:3",
     ],
     deps = [
         ":http_integration_lib",
