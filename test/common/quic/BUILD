@@ -350,6 +350,7 @@ envoy_cc_test_library(
     tags = ["nofips"],
     deps = [
         "//envoy/stream_info:stream_info_interface",
+        "//source/common/network:network_observer_registry_factory_impl_lib",
         "//source/common/quic:envoy_quic_client_connection_lib",
         "//source/common/quic:envoy_quic_client_session_lib",
         "//source/common/quic:envoy_quic_connection_debug_visitor_factory_interface",

@@ -3,10 +3,10 @@
 #include "envoy/common/optref.h"
 #include "envoy/stream_info/stream_info.h"
 
+#include "source/common/network/network_observer_registry_factory_impl.h"
 #include "source/common/quic/envoy_quic_client_connection.h"
 #include "source/common/quic/envoy_quic_client_session.h"
 #include "source/common/quic/envoy_quic_connection_debug_visitor_factory_interface.h"
-#include "source/common/quic/envoy_quic_network_observer_registry_factory.h"
 #include "source/common/quic/envoy_quic_proof_verifier.h"
 #include "source/common/quic/envoy_quic_server_connection.h"
 #include "source/common/quic/envoy_quic_utils.h"
@@ -368,18 +368,18 @@ DECLARE_FACTORY(TestEnvoyQuicConnectionDebugVisitorFactory);
 REGISTER_FACTORY(TestEnvoyQuicConnectionDebugVisitorFactory,
                  Envoy::Quic::EnvoyQuicConnectionDebugVisitorFactoryInterface);
 
-class TestNetworkObserverRegistry : public Quic::EnvoyQuicNetworkObserverRegistry {
+class TestNetworkObserverRegistry : public Network::NetworkObserverRegistryImpl {
 public:
   void onNetworkChanged() {
-    std::list<Quic::QuicNetworkConnectivityObserver*> existing_observers;
-    for (Quic::QuicNetworkConnectivityObserver* observer : registeredQuicObservers()) {
+    std::list<Network::NetworkConnectivityObserver*> existing_observers;
+    for (Network::NetworkConnectivityObserver* observer : registeredObservers()) {
       existing_observers.push_back(observer);
     }
     for (auto* observer : existing_observers) {
       observer->onNetworkChanged();
     }
   }
-  using Quic::EnvoyQuicNetworkObserverRegistry::registeredQuicObservers;
+  using Network::NetworkObserverRegistryImpl::registeredObservers;
 };
 
 } // namespace Quic

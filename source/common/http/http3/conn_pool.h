@@ -5,6 +5,7 @@
 
 #include "envoy/common/optref.h"
 #include "envoy/http/persistent_quic_info.h"
+#include "envoy/network/network_observer.h"
 #include "envoy/upstream/upstream.h"
 
 #include "source/common/http/codec_client.h"
@@ -14,7 +15,6 @@
 #include "source/common/quic/client_connection_factory_impl.h"
 #include "source/common/quic/envoy_quic_utils.h"
 #include "source/common/quic/quic_transport_socket_factory.h"
-#include "source/common/quic/envoy_quic_network_observer_registry_factory.h"
 #include "quiche/quic/core/deterministic_connection_id_generator.h"
 
 #else
@@ -149,7 +149,7 @@ public:
                     CreateCodecFn codec_fn, std::vector<Http::Protocol> protocol,
                     OptRef<PoolConnectResultCallback> connect_callback,
                     Http::PersistentQuicInfo& quic_info,
-                    OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry,
+                    OptRef<Network::NetworkObserverRegistry> network_observer_registry,
                     bool attempt_happy_eyeballs = false);
 
   ~Http3ConnPoolImpl() override;
@@ -187,7 +187,7 @@ private:
   // address. This fails over to using the primary address if the second address
   // in the list isn't of a different address family.
   bool attempt_happy_eyeballs_;
-  OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry_;
+  OptRef<Network::NetworkObserverRegistry> network_observer_registry_;
 };
 
 std::unique_ptr<Http3ConnPoolImpl>
@@ -199,7 +199,7 @@ allocateConnPool(Event::Dispatcher& dispatcher, Random::RandomGenerator& random_
                  OptRef<Http::HttpServerPropertiesCache> rtt_cache, Stats::Scope& scope,
                  OptRef<PoolConnectResultCallback> connect_callback,
                  Http::PersistentQuicInfo& quic_info,
-                 OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry,
+                 OptRef<Network::NetworkObserverRegistry> network_observer_registry,
                  bool attempt_happy_eyeballs = false);
 
 } // namespace Http3

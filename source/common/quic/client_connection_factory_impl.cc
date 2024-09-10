@@ -38,7 +38,7 @@ std::unique_ptr<Network::ClientConnection> createQuicNetworkConnection(
     const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options,
     quic::ConnectionIdGeneratorInterface& generator,
     Network::UpstreamTransportSocketFactory& transport_socket_factory,
-    EnvoyQuicNetworkObserverRegistry* network_observer_registry) {
+    Network::NetworkObserverRegistry* network_observer_registry) {
   // TODO: Quic should take into account the set_local_interface_name_on_upstream_connections config
   // and call maybeSetInterfaceName based on that upon acquiring a local socket.
   // Similar to what is done in ClientConnectionImpl::onConnected().

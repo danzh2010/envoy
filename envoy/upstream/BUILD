@@ -28,6 +28,7 @@ envoy_cc_library(
         "//envoy/http:conn_pool_interface",
         "//envoy/http:persistent_quic_info_interface",
         "//envoy/local_info:local_info_interface",
+        "//envoy/network:network_observer_interface",
         "//envoy/runtime:runtime_interface",
         "//envoy/secret:secret_manager_interface",
         "//envoy/server:admin_interface",

@@ -252,3 +252,12 @@ envoy_cc_library(
         ":address_interface",
     ],
 )
+
+envoy_cc_library(
+    name = "network_observer_interface",
+    hdrs = ["network_observer.h"],
+    deps = [
+        "//envoy/common:pure_lib",
+        "//envoy/event:dispatcher_interface",
+    ],
+)

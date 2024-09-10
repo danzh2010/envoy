@@ -304,7 +304,7 @@ std::vector<std::string> EnvoyQuicClientSession::GetAlpnsToOffer() const {
                                    : configured_alpns_;
 }
 
-void EnvoyQuicClientSession::registerNetworkObserver(EnvoyQuicNetworkObserverRegistry& registry) {
+void EnvoyQuicClientSession::registerNetworkObserver(Network::NetworkObserverRegistry& registry) {
   if (network_connectivity_observer_ == nullptr) {
     network_connectivity_observer_ = std::make_unique<QuicNetworkConnectivityObserver>(*this);
   }

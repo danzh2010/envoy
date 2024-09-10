@@ -109,8 +109,7 @@ Http3ConnPoolImpl::Http3ConnPoolImpl(
     Random::RandomGenerator& random_generator, Upstream::ClusterConnectivityState& state,
     CreateClientFn client_fn, CreateCodecFn codec_fn, std::vector<Http::Protocol> protocol,
     OptRef<PoolConnectResultCallback> connect_callback, Http::PersistentQuicInfo& quic_info,
-    OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry,
-    bool attempt_happy_eyeballs)
+    OptRef<Network::NetworkObserverRegistry> network_observer_registry, bool attempt_happy_eyeballs)
     : FixedHttpConnPoolImpl(host, priority, dispatcher, options, transport_socket_options,
                             random_generator, state, client_fn, codec_fn, protocol, {}, nullptr),
       quic_info_(dynamic_cast<Quic::PersistentQuicInfoImpl&>(quic_info)),
@@ -167,7 +166,7 @@ allocateConnPool(Event::Dispatcher& dispatcher, Random::RandomGenerator& random_
                  OptRef<Http::HttpServerPropertiesCache> rtt_cache, Stats::Scope& scope,
                  OptRef<PoolConnectResultCallback> connect_callback,
                  Http::PersistentQuicInfo& quic_info,
-                 OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry,
+                 OptRef<Network::NetworkObserverRegistry> network_observer_registry,
                  bool attempt_happy_eyeballs) {
   return std::make_unique<Http3ConnPoolImpl>(
       host, priority, dispatcher, options, transport_socket_options, random_generator, state,

@@ -499,6 +499,7 @@ envoy_cc_test(
         "//source/common/quic:quic_client_factory_lib",
         "//source/common/quic:quic_transport_socket_factory_lib",
         "//source/common/quic:client_connection_factory_lib",
+        "//source/common/network:network_observer_registry_factory_impl_lib",
     ]),
 )
 

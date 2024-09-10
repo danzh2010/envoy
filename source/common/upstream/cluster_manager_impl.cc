@@ -1711,16 +1711,12 @@ Config::EdsResourcesCacheOptRef ClusterManagerImpl::edsResourcesCache() {
 }
 
 void ClusterManagerImpl::createNetworkObserverRegistries(
-    Quic::EnvoyQuicNetworkObserverRegistryFactory& factory) {
-#ifdef ENVOY_ENABLE_QUIC
+    Network::NetworkObserverRegistryFactory& factory) {
   tls_.runOnAllThreads([&factory](OptRef<ThreadLocalClusterManagerImpl> cluster_manager) {
     ENVOY_LOG(trace, "cm: create network observer registry in {}",
               cluster_manager->thread_local_dispatcher_.name());
     cluster_manager->createThreadLocalNetworkObserverRegistry(factory);
   });
-#else
-  (void)factory;
-#endif
 }
 
 ClusterDiscoveryManager
@@ -2225,7 +2221,7 @@ Http::ConnectionPool::InstancePtr ProdClusterManagerFactory::allocateConnPool(
     const Network::ConnectionSocket::OptionsSharedPtr& options,
     const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options,
     TimeSource& source, ClusterConnectivityState& state, Http::PersistentQuicInfoPtr& quic_info,
-    OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry) {
+    OptRef<Network::NetworkObserverRegistry> network_observer_registry) {
 
   Http::HttpServerPropertiesCacheSharedPtr alternate_protocols_cache;
   if (alternate_protocol_options.has_value()) {

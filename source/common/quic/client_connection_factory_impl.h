@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "envoy/http/persistent_quic_info.h"
+#include "envoy/network/network_observer.h"
 #include "envoy/upstream/upstream.h"
 
 #include "source/common/quic/envoy_quic_alarm_factory.h"
@@ -46,7 +47,7 @@ std::unique_ptr<Network::ClientConnection> createQuicNetworkConnection(
     const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options,
     quic::ConnectionIdGeneratorInterface& generator,
     Network::UpstreamTransportSocketFactory& transport_socket_factory,
-    EnvoyQuicNetworkObserverRegistry* network_observer_registry = nullptr);
+    Network::NetworkObserverRegistry* network_observer_registry = nullptr);
 
 } // namespace Quic
 } // namespace Envoy

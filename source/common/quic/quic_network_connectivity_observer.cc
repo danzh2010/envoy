@@ -6,7 +6,7 @@ namespace Envoy {
 namespace Quic {
 
 QuicNetworkConnectivityObserver::QuicNetworkConnectivityObserver(EnvoyQuicClientSession& session)
-    : session_(session) {}
+    : Network::NetworkConnectivityObserver(), session_(session) {}
 
 } // namespace Quic
 } // namespace Envoy

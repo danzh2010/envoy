@@ -5,6 +5,7 @@
 #include "envoy/config/core/v3/base.pb.h"
 
 #include "source/common/config/xds_resource.h"
+#include "source/common/network/network_observer_registry_factory_impl.h"
 #include "source/common/network/raw_buffer_socket.h"
 #include "source/common/network/resolver_impl.h"
 #include "source/common/router/context_impl.h"
@@ -6372,7 +6373,7 @@ TEST_F(ClusterManagerImplTest, PassDownNetworkObserverRegistryToConnectionPool) 
   EXPECT_TRUE(cluster_manager_->addOrUpdateCluster(parseClusterFromV3Yaml(cluster_api), "v1"));
   auto cluster_added_via_api = cluster_manager_->getThreadLocalCluster("added_via_api");
 
-  Quic::EnvoyQuicNetworkObserverRegistryFactory registry_factory;
+  Network::NetworkObserverRegistryFactoryImpl registry_factory;
   cluster_manager_->createNetworkObserverRegistries(registry_factory);
 
   NiceMock<MockLoadBalancerContext> lb_context;
@@ -6382,12 +6383,12 @@ TEST_F(ClusterManagerImplTest, PassDownNetworkObserverRegistryToConnectionPool) 
   ON_CALL(downstream_connection, socketOptions()).WillByDefault(ReturnRef(options_to_return));
 
   auto* pool = new Http::ConnectionPool::MockInstance();
-  Quic::EnvoyQuicNetworkObserverRegistry* created_registry = nullptr;
+  Network::NetworkObserverRegistry* created_registry = nullptr;
   EXPECT_CALL(*pool, addIdleCallback(_));
   EXPECT_CALL(factory_, allocateConnPool_(_, _, _, _, _, _))
       .WillOnce(testing::WithArg<5>(
           Invoke([pool, created_registry_ptr = &created_registry](
-                     OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry) {
+                     OptRef<Network::NetworkObserverRegistry> network_observer_registry) {
             EXPECT_TRUE(network_observer_registry.has_value());
             *created_registry_ptr = network_observer_registry.ptr();
             return pool;
@@ -6403,7 +6404,7 @@ TEST_F(ClusterManagerImplTest, PassDownNetworkObserverRegistryToConnectionPool) 
   EXPECT_CALL(factory_, allocateConnPool_(_, _, _, _, _, _))
       .WillOnce(testing::WithArg<5>(
           Invoke([pool, created_registry](
-                     OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry) {
+                     OptRef<Network::NetworkObserverRegistry> network_observer_registry) {
             EXPECT_TRUE(network_observer_registry.has_value());
             EXPECT_EQ(created_registry, network_observer_registry.ptr());
             return pool;

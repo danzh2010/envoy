@@ -4,6 +4,7 @@
 
 #include "source/common/http/conn_pool_grid.h"
 #include "source/common/http/http_server_properties_cache_impl.h"
+#include "source/common/network/network_observer_registry_factory_impl.h"
 #include "source/common/upstream/transport_socket_match_impl.h"
 
 #include "test/common/http/common.h"
@@ -238,7 +239,7 @@ public:
   testing::NiceMock<ThreadLocal::MockInstance> thread_local_;
   NiceMock<Event::MockDispatcher> dispatcher_;
 
-  Quic::EnvoyQuicNetworkObserverRegistry registry_;
+  Network::NetworkObserverRegistryImpl registry_;
   std::unique_ptr<ConnectivityGridForTest> grid_;
   std::string host_impl_hostname_ = "hostname";
 };

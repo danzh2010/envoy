@@ -20,6 +20,7 @@
 #include "envoy/http/conn_pool.h"
 #include "envoy/http/persistent_quic_info.h"
 #include "envoy/local_info/local_info.h"
+#include "envoy/network/network_observer.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/secret/secret_manager.h"
 #include "envoy/server/admin.h"
@@ -38,13 +39,6 @@
 #include "absl/container/node_hash_map.h"
 
 namespace Envoy {
-
-namespace Quic {
-
-class EnvoyQuicNetworkObserverRegistryFactory;
-class EnvoyQuicNetworkObserverRegistry;
-
-} // namespace Quic
 
 namespace Upstream {
 
@@ -480,8 +474,8 @@ public:
    * Create a QUIC network observer registry for each worker thread using the given factory.
    * @param factory used to create a registry object.
    */
-  virtual void createNetworkObserverRegistries(
-      Envoy::Quic::EnvoyQuicNetworkObserverRegistryFactory& factory) PURE;
+  virtual void
+  createNetworkObserverRegistries(Network::NetworkObserverRegistryFactory& factory) PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
@@ -542,7 +536,7 @@ public:
                    const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options,
                    TimeSource& time_source, ClusterConnectivityState& state,
                    Http::PersistentQuicInfoPtr& quic_info,
-                   OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry) PURE;
+                   OptRef<Network::NetworkObserverRegistry> network_observer_registry) PURE;
 
   /**
    * Allocate a TCP connection pool for the host. Pools are separated by 'priority' and

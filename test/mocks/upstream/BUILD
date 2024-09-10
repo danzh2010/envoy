@@ -241,8 +241,8 @@ envoy_cc_mock(
     srcs = ["cluster_manager_factory.cc"],
     hdrs = ["cluster_manager_factory.h"],
     deps = [
+        "//envoy/network:network_observer_interface",
         "//envoy/upstream:cluster_manager_interface",
-        "//source/common/quic:envoy_quic_network_observer_registry_factory_lib",
         "//source/common/singleton:manager_impl_lib",
         "//test/mocks/secret:secret_mocks",
         "//test/test_common:thread_factory_for_test_lib",

@@ -639,3 +639,13 @@ envoy_cc_library(
         "//envoy/stream_info:filter_state_interface",
     ],
 )
+
+envoy_cc_library(
+    name = "network_observer_registry_factory_impl_lib",
+    hdrs = [
+        "network_observer_registry_factory_impl.h",
+    ],
+    deps = [
+        "//envoy/network:network_observer_interface",
+    ],
+)

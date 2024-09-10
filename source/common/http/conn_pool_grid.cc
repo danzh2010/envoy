@@ -298,7 +298,7 @@ ConnectivityGrid::ConnectivityGrid(
     HttpServerPropertiesCacheSharedPtr alternate_protocols,
     ConnectivityOptions connectivity_options, Quic::QuicStatNames& quic_stat_names,
     Stats::Scope& scope, Http::PersistentQuicInfo& quic_info,
-    OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry)
+    OptRef<Network::NetworkObserverRegistry> network_observer_registry)
     : dispatcher_(dispatcher), random_generator_(random_generator), host_(host), options_(options),
       transport_socket_options_(transport_socket_options), state_(state),
       next_attempt_duration_(std::chrono::milliseconds(kDefaultTimeoutMs)),

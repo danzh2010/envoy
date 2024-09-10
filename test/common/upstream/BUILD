@@ -90,6 +90,7 @@ envoy_cc_test(
     ],
     deps = [
         ":test_cluster_manager",
+        "//source/common/network:network_observer_registry_factory_impl_lib",
         "//source/common/router:context_lib",
         "//source/common/upstream:load_balancer_factory_base_lib",
         "//source/extensions/clusters/eds:eds_lib",

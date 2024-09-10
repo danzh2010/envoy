@@ -19,6 +19,7 @@
 #include "envoy/config/xds_resources_delegate.h"
 #include "envoy/http/codes.h"
 #include "envoy/local_info/local_info.h"
+#include "envoy/network/network_observer.h"
 #include "envoy/router/context.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/secret/secret_manager.h"
@@ -33,7 +34,6 @@
 #include "source/common/http/async_client_impl.h"
 #include "source/common/http/http_server_properties_cache_impl.h"
 #include "source/common/http/http_server_properties_cache_manager_impl.h"
-#include "source/common/quic/envoy_quic_network_observer_registry_factory.h"
 #include "source/common/quic/quic_stat_names.h"
 #include "source/common/tcp/async_tcp_client_impl.h"
 #include "source/common/upstream/cluster_discovery_manager.h"
@@ -68,16 +68,16 @@ public:
   // Upstream::ClusterManagerFactory
   ClusterManagerPtr
   clusterManagerFromProto(const envoy::config::bootstrap::v3::Bootstrap& bootstrap) override;
-  Http::ConnectionPool::InstancePtr allocateConnPool(
-      Event::Dispatcher& dispatcher, HostConstSharedPtr host, ResourcePriority priority,
-      std::vector<Http::Protocol>& protocol,
-      const absl::optional<envoy::config::core::v3::AlternateProtocolsCacheOptions>&
-          alternate_protocol_options,
-      const Network::ConnectionSocket::OptionsSharedPtr& options,
-      const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options,
-      TimeSource& time_source, ClusterConnectivityState& state,
-      Http::PersistentQuicInfoPtr& quic_info,
-      OptRef<Quic::EnvoyQuicNetworkObserverRegistry> network_observer_registry) override;
+  Http::ConnectionPool::InstancePtr
+  allocateConnPool(Event::Dispatcher& dispatcher, HostConstSharedPtr host,
+                   ResourcePriority priority, std::vector<Http::Protocol>& protocol,
+                   const absl::optional<envoy::config::core::v3::AlternateProtocolsCacheOptions>&
+                       alternate_protocol_options,
+                   const Network::ConnectionSocket::OptionsSharedPtr& options,
+                   const Network::TransportSocketOptionsConstSharedPtr& transport_socket_options,
+                   TimeSource& time_source, ClusterConnectivityState& state,
+                   Http::PersistentQuicInfoPtr& quic_info,
+                   OptRef<Network::NetworkObserverRegistry> network_observer_registry) override;
   Tcp::ConnectionPool::InstancePtr
   allocateTcpConnPool(Event::Dispatcher& dispatcher, HostConstSharedPtr host,
                       ResourcePriority priority,
@@ -373,8 +373,7 @@ public:
 
   Config::EdsResourcesCacheOptRef edsResourcesCache() override;
 
-  void
-  createNetworkObserverRegistries(Quic::EnvoyQuicNetworkObserverRegistryFactory& factory) override;
+  void createNetworkObserverRegistries(Network::NetworkObserverRegistryFactory& factory) override;
 
 protected:
   // ClusterManagerImpl's constructor should not be invoked directly; create instances from the
@@ -700,17 +699,14 @@ private:
      */
     ClusterEntry* initializeClusterInlineIfExists(absl::string_view cluster);
 
-    OptRef<Quic::EnvoyQuicNetworkObserverRegistry> getNetworkObserverRegistry() {
+    OptRef<Network::NetworkObserverRegistry> getNetworkObserverRegistry() {
       return makeOptRefFromPtr(network_observer_registry_.get());
     }
 
-#ifdef ENVOY_ENABLE_QUIC
-    void createThreadLocalNetworkObserverRegistry(
-        Quic::EnvoyQuicNetworkObserverRegistryFactory& factory) {
-      network_observer_registry_ =
-          factory.createQuicNetworkObserverRegistry(thread_local_dispatcher_);
+    void
+    createThreadLocalNetworkObserverRegistry(Network::NetworkObserverRegistryFactory& factory) {
+      network_observer_registry_ = factory.createNetworkObserverRegistry(thread_local_dispatcher_);
     }
-#endif
 
     ClusterManagerImpl& parent_;
     Event::Dispatcher& thread_local_dispatcher_;
@@ -738,7 +734,7 @@ private:
     static ThreadLocalClusterManagerStats generateStats(Stats::Scope& scope,
                                                         const std::string& thread_name);
 
-    Quic::EnvoyQuicNetworkObserverRegistryPtr network_observer_registry_;
+    std::unique_ptr<Network::NetworkObserverRegistry> network_observer_registry_;
   };
 
   struct ClusterData : public ClusterManagerCluster {
