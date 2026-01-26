@@ -229,7 +229,7 @@ private:
 
   // Probe for connectivity for the provided `domain` and get a pointer to the local address. If
   // there is no connectivity for the `domain`, a null pointer will be returned.
-  static Network::Address::InstanceConstSharedPtr probeAndGetLocalAddr(int domain);
+  Network::Address::InstanceConstSharedPtr probeAndGetLocalAddr(int domain);
 
   // Called when it's been determined that the default network has changed.
   void resetHttpPropertiesAndDrainHosts(bool has_ipv6_connectivity);

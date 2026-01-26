@@ -2,6 +2,7 @@
 
 #include <sys/resource.h>
 
+#include "network/connectivity_manager.h"
 #include "source/common/api/os_sys_calls_impl.h"
 #include "source/common/common/lock_guard.h"
 #include "source/common/common/utility.h"
@@ -593,6 +594,9 @@ Network::Address::InstanceConstSharedPtr InternalEngine::probeAndGetLocalAddr(in
   }
   Network::IoSocketHandleImpl socket_handle(socket_result.return_value_,
                                             /* socket_v6only= */ domain == AF_INET6, {domain});
+  if (connectivity_manager_ && (connectivity_manager_->getDefaultNetwork() != kInvalidNetworkHandle)) {
+    // SystemHelper::getInstance().bindSocketToNetwork(socket_handle, net);
+  }
   Api::SysCallIntResult connect_result =
       socket_handle.connect(domain == AF_INET6 ? ipv6ProbeAddr() : ipv4ProbeAddr());
   if (connect_result.return_value_ != 0) {

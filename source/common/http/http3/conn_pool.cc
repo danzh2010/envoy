@@ -142,6 +142,8 @@ std::unique_ptr<Network::ClientConnection>
 Http3ConnPoolImpl::createClientConnection(Quic::QuicStatNames& quic_stat_names,
                                           OptRef<Http::HttpServerPropertiesCache> rtt_cache,
                                           Stats::Scope& scope) {
+  ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::pool), trace,
+   "======= danzh456: createClientConnection");
   std::shared_ptr<quic::QuicCryptoClientConfig> crypto_config =
       host_->transportSocketFactory().getCryptoConfig();
   if (crypto_config == nullptr) {
@@ -155,6 +157,8 @@ Http3ConnPoolImpl::createClientConnection(Quic::QuicStatNames& quic_stat_names,
   auto upstream_local_address = upstream_local_address_selector->getUpstreamLocalAddress(
       address, socketOptions(), makeOptRefFromPtr(transport_options.get()));
 
+  ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::pool), debug,
+   "======= danzh456: Creating HTTP/3 connection to {}", address->asString());
   return Quic::createQuicNetworkConnection(
       quic_info_, std::move(crypto_config), server_id_, dispatcher(), address,
       upstream_local_address.address_, quic_stat_names, rtt_cache, scope,
@@ -178,7 +182,7 @@ allocateConnPool(Event::Dispatcher& dispatcher, Random::RandomGenerator& random_
       [&quic_stat_names, rtt_cache,
        &scope](HttpConnPoolImplBase* pool) -> ::Envoy::ConnectionPool::ActiveClientPtr {
         ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::pool), debug,
-                            "Creating Http/3 client");
+                            "====== danzh456: Creating Http/3 client");
         // If there's no ssl context, the secrets are not loaded. Fast-fail by returning null.
         auto factory = &pool->host()->transportSocketFactory();
         if (factory->sslCtx() == nullptr) {

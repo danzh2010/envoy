@@ -41,6 +41,7 @@ void DefaultSystemHelper::bindSocketToNetwork(Network::ConnectionSocket& socket,
                    Envoy::errorDetails(errno));
     socket.close();
   }
+  ENVOY_LOG_MISC(debug, "======= danzh: bind socket to network {}", network_handle);
 }
 
 } // namespace Envoy

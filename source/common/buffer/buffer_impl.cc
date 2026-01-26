@@ -702,7 +702,7 @@ size_t OwnedImpl::addFragments(absl::Span<const absl::string_view> fragments) {
 
     // Commit what we've written to the existing reservation.
     if (bytes_written_to_reservation > 0) {
-      back.commit<false>({reservation.mem_, bytes_written_to_reservation});
+      back.commit<false>({reservation.mem_, static_cast<size_t>(bytes_written_to_reservation)});
       length_ += bytes_written_to_reservation;
     }
 

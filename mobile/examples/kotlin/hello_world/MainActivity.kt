@@ -25,8 +25,8 @@ import java.util.concurrent.TimeUnit
 
 private const val TAG = "MainActivity"
 private const val REQUEST_HANDLER_THREAD_NAME = "hello_envoy_kt"
-private const val REQUEST_AUTHORITY = "api.lyft.com"
-private const val REQUEST_PATH = "/ping"
+private const val REQUEST_AUTHORITY = "api.google.com"
+private const val REQUEST_PATH = "/"
 private const val REQUEST_SCHEME = "https"
 private val FILTERED_HEADERS =
   setOf(
@@ -34,7 +34,8 @@ private val FILTERED_HEADERS =
     "filter-demo",
     "buffer-filter-demo",
     "async-filter-demo",
-    "x-envoy-upstream-service-time"
+    "x-envoy-upstream-service-time",
+    "x-envoy-upstream-alpn",
   )
 
 /** The main activity of the app. */
@@ -51,12 +52,20 @@ class MainActivity : Activity() {
 
     engine =
       AndroidEngineBuilder(application)
-        .setLogLevel(LogLevel.DEBUG)
+        .setUseV2NetworkMonitor(true)
+        .setEnableQuicConnectionMigration(true)
+        .addQuicHint("foo.google.com", 443)
+        .addQuicHint("google.com", 443)
+        .addQuicCanonicalSuffix(".google.com")
+        .enableHttp3(true)
+        .addRuntimeGuard("dns_cache_set_ip_version_to_remove", true)
+        .addRuntimeGuard("mobile_ipv6_probe_advanced_filtering", true)
+        .setLogLevel(LogLevel.TRACE)
         .setLogger { _, msg -> Log.d(TAG, msg) }
         .enableProxying(true)
-        .addPlatformFilter(::DemoFilter)
-        .addPlatformFilter(::BufferDemoFilter)
-        .addPlatformFilter(::AsyncDemoFilter)
+        .addPlatformFilter("demo_filter", ::DemoFilter)
+        .addPlatformFilter("buffer_demo_filter", ::BufferDemoFilter)
+        .addPlatformFilter("async_demo_filter", ::AsyncDemoFilter)
         .addNativeFilter(
           "envoy.filters.http.buffer",
           Any.newBuilder()
@@ -86,7 +95,8 @@ class MainActivity : Activity() {
     thread.start()
     val handler = Handler(thread.looper)
 
-    // Run a request loop and record stats until the application exits.
+    // Run a request loop and record stats until the application exits (exactly 5 times).
+    var remaining = 10000
     handler.postDelayed(
       object : Runnable {
         override fun run() {
@@ -97,8 +107,11 @@ class MainActivity : Activity() {
             Log.d(TAG, "exception making request or recording stats", e)
           }
 
-          // Make a call and report stats again
-          handler.postDelayed(this, TimeUnit.SECONDS.toMillis(1))
+          // Decrement and repost only if more runs remain
+          remaining -= 1
+          if (remaining > 0) {
+            handler.postDelayed(this, TimeUnit.SECONDS.toMillis(1))
+          }
         }
       },
       TimeUnit.SECONDS.toMillis(1)
@@ -115,14 +128,17 @@ class MainActivity : Activity() {
     // The Java example uses http so http/1.1. This is done on purpose to test both paths in
     // end-to-end tests in CI.
     val requestHeaders =
-      RequestHeadersBuilder(RequestMethod.GET, REQUEST_SCHEME, REQUEST_AUTHORITY, REQUEST_PATH)
+      RequestHeadersBuilder(RequestMethod.GET, REQUEST_SCHEME, "google.com", REQUEST_PATH)
         .build()
+    var status: Int = 0
+    var message = ""
+    var headerText = ""
     engine
       .streamClient()
       .newStreamPrototype()
       .setOnResponseHeaders { responseHeaders, _, _ ->
-        val status = responseHeaders.httpStatus ?: 0L
-        val message = "received headers with status $status"
+        status = responseHeaders.httpStatus ?: 0
+        message = "received headers with status $status"
 
         val sb = StringBuilder()
         for ((name, value) in responseHeaders.caseSensitiveHeaders()) {
@@ -130,24 +146,34 @@ class MainActivity : Activity() {
             sb.append(name).append(": ").append(value.joinToString()).append("\n")
           }
         }
-        val headerText = sb.toString()
+        headerText = sb.toString()
 
         Log.d(TAG, message)
         responseHeaders.value("filter-demo")?.first()?.let { filterDemoValue ->
           Log.d(TAG, "filter-demo: $filterDemoValue")
         }
-
-        if (status == 200) {
-          recyclerView.post { viewAdapter.add(Success(message, headerText)) }
+      }
+      .setOnComplete { finalStreamIntel ->
+        val socketReused = finalStreamIntel.socketReused
+        var attemptCount = finalStreamIntel.attemptCount
+        val streamIntel = "socket reuse? $socketReused, with $attemptCount attempt(s)"
+        Log.d(TAG, streamIntel)
+        if (status == 200 || (status >= 300 && status < 400)) {
+          recyclerView.post {
+            viewAdapter.add(Success(message + ", " + streamIntel, headerText))
+          }
         } else {
-          recyclerView.post { viewAdapter.add(Failure(message)) }
+          recyclerView.post {
+            viewAdapter.add(Failure(message))
+            viewAdapter.add(Success(streamIntel, headerText))
+          }
         }
       }
       .setOnError { error, _ ->
         val attemptCount = error.attemptCount ?: -1
-        val message = "failed with error after $attemptCount attempts: ${error.message}"
-        Log.d(TAG, message)
-        recyclerView.post { viewAdapter.add(Failure(message)) }
+        val errorMessage = "failed with error after $attemptCount attempts: ${error.message}"
+        Log.d(TAG, errorMessage)
+        recyclerView.post { viewAdapter.add(Failure(errorMessage)) }
       }
       .start(Executors.newSingleThreadExecutor())
       .sendHeaders(requestHeaders, true)
